@@ -1,31 +1,48 @@
 @import "tailwindcss";
 
+/* 針對 Tailwind v4 的樣式定義 */
 @theme {
   --color-apple-black: #000000;
-  --color-apple-darkGray: #1C1C1E;
-  --color-apple-secondaryDark: #2C2C2E;
+  --color-apple-dark-gray: #1C1C1E;
+  --color-apple-secondary-dark: #2C2C2E;
   --color-apple-blue: #0A84FF;
   --color-apple-green: #34C759;
   --color-apple-red: #FF453A;
   --color-apple-gray: #8E8E93;
-  --color-apple-lightGray: #D1D1D6;
-  --color-apple-white: #FFFFFF;
-
-  --font-sans: "SF Pro Display", "SF Pro Text", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-
-  --radius-apple-xl: 12px;
-  --radius-apple-2xl: 16px;
-  --radius-apple-3xl: 20px;
 }
 
 @layer base {
   body {
-    @apply bg-apple-black text-apple-white antialiased font-sans;
+    /* 確保背景為純黑，文字為純白 */
+    background-color: #121212;
+    @apply text-white antialiased;
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
   }
 }
 
 @layer components {
-  .glass-card {
-    @apply bg-apple-darkGray/60 backdrop-blur-xl border border-white/10 rounded-apple-2xl;
+  /* 列表每一行的樣式 */
+  .stock-row {
+    @apply flex items-center justify-between py-3 px-4 transition-colors border-b border-white/10;
   }
+
+  /* 漲跌色塊樣式 */
+  .price-tag {
+    @apply mt-1 px-2 py-1 rounded-md text-sm font-bold min-w-[75px] text-right text-white;
+  }
+}
+
+/* Material Icons 支援 */
+.material-icons {
+  font-family: 'Material Icons';
+  font-weight: normal;
+  font-style: normal;
+  display: inline-block;
+  line-height: 1;
+  text-transform: none;
+  letter-spacing: normal;
+  word-wrap: normal;
+  white-space: nowrap;
+  direction: ltr;
 }
