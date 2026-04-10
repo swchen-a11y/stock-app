@@ -1,52 +1,5 @@
-# --- [ 1. 敏感資訊 - 絕對禁止上傳 ] ---
-.env
-.env.local
-.env.*.local
-*.env
-supabase_service_role.key
-service-account.json
-
-# --- [ 2. Python 相關 - 雜訊與環境 ] ---
-.venv/
-venv/
-ENV/
-build/
-dist/
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-lib/
-bin/
-include/
-pip-log.txt
-pip-delete-this-directory.txt
-
-# --- [ 3. React / Node.js 相關 ] ---
 node_modules/
-/dist
-/build
-.eslintcache
-.stylelintcache
+.next/
+.env*.local
+dist/
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# --- [ 4. 編輯器與系統雜項 ] ---
-.vscode/*
-!.vscode/extensions.json
-.idea/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-.DS_Store
-Thumbs.db
-
-# --- [ 5. Supabase 臨時文件 ] ---
-supabase/.temp/

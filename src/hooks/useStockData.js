@@ -1,171 +1,110 @@
-import { useState, useEffect, useCallback } from 'react';
+"use client";
+
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 
-const MARKET_MAP = { '陸股': 'CN', '台股': 'TW', '美股': 'US' };
-
-const useStockData = (selectedMarket) => {
+export default function useStockData(selectedMarket) {
   const [stocks, setStocks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [refreshTrigger, setRefreshTrigger] = useState(0); // 新增觸發器以強制重新渲染
-  const [userLists, setUserLists] = useState(() => {
-    const saved = localStorage.getItem('user_custom_lists');
-    return saved ? JSON.parse(saved) : [
-      { id: 'default', name: '我的代號', isFixed: true },
-      { id: 'tw', name: '台股' },
-      { id: 'cn', name: '陸股' }
-    ];
-  });
+  
+  // 使用 useRef 儲存當前的 selectedMarket，確保 Realtime 回調永遠能拿到最新值
+  const marketRef = useRef(selectedMarket);
 
-  // 保存用戶列表到 localStorage
   useEffect(() => {
-    localStorage.setItem('user_custom_lists', JSON.stringify(userLists));
-  }, [userLists]);
+    marketRef.current = selectedMarket;
+  }, [selectedMarket]);
 
-  // 獲取股票所屬列表的輔助函式
-  const getStockBelongsTo = useCallback((symbol) => {
-    const categories = JSON.parse(localStorage.getItem('stock_categories') || '{}');
-    return categories[symbol] || ['我的代號'];
-  }, [refreshTrigger]); // 監聽觸發器
-
-  // 獲取排序狀態的輔助函式
-  const getSortedSymbols = useCallback((marketName) => {
-    const sorted = JSON.parse(localStorage.getItem(`sort_order_${marketName}`) || '[]');
-    return sorted;
-  }, []);
-
-  const fetchStocks = useCallback(async () => {
+  // 1. 核心抓取函數：增加 isSilent 參數避免 UI 閃爍
+  const fetchStocks = useCallback(async (isSilent = false) => {
+    // 只有在非靜默加載（如切換市場或初次載入）時才顯示 Loading
+    if (!isSilent) setLoading(true);
+    
     try {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('watchlist')
-        .select('*')
-        .order('added_at', { ascending: false });
+        const currentMarket = marketRef.current;
+        let query = supabase.from('watchlist').select('*');
+        
+        // 根據分組過濾 (與 supabase_schema.sql 中的 TEXT[] 陣列對齊)
+        if (currentMarket && currentMarket !== '我的代號') {
+          query = query.contains('group_name', [currentMarket]);
+        }
 
-      if (error) throw error;
+        // 按照排序權重和新增時間排序
+        query = query
+          .order('sort_order', { ascending: true })
+          .order('added_at', { ascending: false });
 
-      let filteredData = data || [];
-      
-      // 根據選定分類過濾
-      filteredData = filteredData.filter(stock => {
-        const belongsTo = getStockBelongsTo(stock.symbol);
-        return belongsTo.includes(selectedMarket);
-      });
-
-      // 應用拖拽排序持久化
-      const sortOrder = getSortedSymbols(selectedMarket);
-      if (sortOrder.length > 0) {
-        filteredData.sort((a, b) => {
-          const indexA = sortOrder.indexOf(a.symbol);
-          const indexB = sortOrder.indexOf(b.symbol);
-          if (indexA === -1 && indexB === -1) return 0;
-          if (indexA === -1) return 1;
-          if (indexB === -1) return -1;
-          return indexA - indexB;
+        const { data, error } = await query;
+        if (error) throw error;
+        
+        // 驗證資料完整性
+        const validatedData = (data || []).map(stock => {
+          // 確保所有必要欄位都有值
+          return {
+            ...stock,
+            market: stock.market || 'TW',
+            name: stock.name || '',
+            group_name: stock.group_name || ['我的代號'],
+            category: stock.category || ''
+          };
         });
+        
+        console.log('[useStockData] 抓取到', validatedData.length, '筆股票資料');
+        if (validatedData.length > 0) {
+          console.log('[useStockData] 第一筆資料結構:', Object.keys(validatedData[0]));
+        }
+        
+        setStocks(validatedData);
+      } catch (error) {
+        console.error('[useStockData] 抓取失敗:', error);
+      } finally {
+        setLoading(false);
       }
+  }, []); // 移除依賴項，完全透過 marketRef 獲取最新狀態
 
-      setStocks(filteredData);
-    } catch (error) {
-      console.error('Error fetching stocks:', error.message);
-      // 如果是網絡錯誤或連接關閉，可以考慮在 UI 顯示重試按鈕或自動重試
-      if (error.message === 'Failed to fetch' || error.message.includes('CONNECTION_CLOSED')) {
-        // 這裡可以根據需要設置一個特定的錯誤狀態
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedMarket, getStockBelongsTo, getSortedSymbols]);
-
+  // 2. 設置實時監聽與初始載入
   useEffect(() => {
-    fetchStocks();
+    // 監聽觀察清單變動 (Insert/Update/Delete)
+    const watchlistChannel = supabase
+      .channel('watchlist-realtime')
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'watchlist' }, 
+        () => fetchStocks(true) // 靜默刷新
+      )
+      .subscribe();
+
+    // 監聽分組變動 (當分組改名觸發 SQL Trigger 時)
+    const groupChannel = supabase
+      .channel('groups-realtime')
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'user_groups' }, 
+        () => fetchStocks(true)
+      )
+      .subscribe();
+
+    // 執行初始載入
+    fetchStocks(false);
+
+    return () => {
+      supabase.removeChannel(watchlistChannel);
+      supabase.removeChannel(groupChannel);
+    };
   }, [fetchStocks]);
 
-  // 更新排序並保存到 localStorage
-  const updateSortOrder = (newStocks) => {
+  // 3. 響應外部 selectedMarket 變更 (手動切換時)
+  useEffect(() => {
+    fetchStocks(false); // 切換分組時顯示 Loading 轉圈，提升互動回饋
+  }, [selectedMarket, fetchStocks]);
+
+  // 4. 更新本地排序 (由 Reorder.Group 呼叫)
+  const updateSortOrder = useCallback((newStocks) => {
     setStocks(newStocks);
-    const symbolOrder = newStocks.map(s => s.symbol);
-    localStorage.setItem(`sort_order_${selectedMarket}`, JSON.stringify(symbolOrder));
+    // 此處可擴充：將新的排序序號寫回資料庫
+  }, []);
+
+  return { 
+    stocks, 
+    loading, 
+    refresh: () => fetchStocks(true), // 提供給 page.jsx 手動觸發的靜默刷新
+    updateSortOrder
   };
-
-  const toggleStockInList = async (symbol, listName) => {
-    const categories = JSON.parse(localStorage.getItem('stock_categories') || '{}');
-    let currentLists = categories[symbol] || [];
-
-    if (currentLists.includes(listName)) {
-      currentLists = currentLists.filter(name => name !== listName);
-    } else {
-      currentLists = [...currentLists, listName];
-    }
-    
-    if (currentLists.length === 0) currentLists = ['我的代號'];
-
-    categories[symbol] = currentLists;
-    localStorage.setItem('stock_categories', JSON.stringify(categories));
-    setRefreshTrigger(prev => prev + 1); // 觸發重新渲染
-    return currentLists;
-  };
-
-  const deleteList = (listId) => {
-    const listToDelete = userLists.find(l => l.id === listId);
-    if (!listToDelete || listToDelete.isFixed) return;
-
-    // 1. 刪除列表本身
-    const newList = userLists.filter(l => l.id !== listId);
-    setUserLists(newList);
-
-    // 2. 清理該列表下的股票映射
-    const categories = JSON.parse(localStorage.getItem('stock_categories') || '{}');
-    Object.keys(categories).forEach(symbol => {
-      categories[symbol] = categories[symbol].filter(name => name !== listToDelete.name);
-      if (categories[symbol].length === 0) categories[symbol] = ['我的代號'];
-    });
-    localStorage.setItem('stock_categories', JSON.stringify(categories));
-    
-    // 3. 如果當前選中的是已刪除的列表，切換回預設
-    if (selectedMarket === listToDelete.name) {
-      return true; // 通知外部需要切換市場
-    }
-    return false;
-  };
-
-  const renameList = (listId, newName) => {
-    const listToRename = userLists.find(l => l.id === listId);
-    if (!listToRename || listToRename.isFixed) return;
-
-    const oldName = listToRename.name;
-    const updatedLists = userLists.map(l => l.id === listId ? { ...l, name: newName } : l);
-    setUserLists(updatedLists);
-
-    // 同步更新股票映射中的名稱
-    const categories = JSON.parse(localStorage.getItem('stock_categories') || '{}');
-    Object.keys(categories).forEach(symbol => {
-      categories[symbol] = categories[symbol].map(name => name === oldName ? newName : name);
-    });
-    localStorage.setItem('stock_categories', JSON.stringify(categories));
-    
-    return oldName;
-  };
-
-  const addList = (name) => {
-    if (!name.trim()) return;
-    const newList = { id: Date.now().toString(), name };
-    setUserLists(prev => [...prev, newList]);
-    return newList;
-  };
-
-  return {
-    stocks,
-    loading,
-    userLists,
-    setUserLists,
-    fetchStocks,
-    updateSortOrder,
-    toggleStockInList,
-    getStockBelongsTo,
-    deleteList,
-    renameList,
-    addList
-  };
-};
-
-export default useStockData;
+}

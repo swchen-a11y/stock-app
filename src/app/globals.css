@@ -1,0 +1,113 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #121212;
+  --foreground: #ffffff;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+/* 隱藏滾動條但保留功能 */
+::-webkit-scrollbar {
+  display: none;
+}
+
+/* iOS 原生液態玻璃基礎類別 */
+.ios-liquid-glass {
+  background: rgba(28, 28, 30, 0.6);
+  backdrop-filter: blur(30px) saturate(150%);
+  border: 0.5px solid rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.05);
+}
+
+/* 漲跌幅膠囊樣式 */
+.ios-pill-up {
+  @apply bg-[#FF453A] text-white rounded-[8px] px-2 py-[2px] text-[13px] font-semibold;
+}
+
+.ios-pill-down {
+  @apply bg-[#30D158] text-white rounded-[8px] px-2 py-[2px] text-[13px] font-semibold;
+}
+
+/* iOS 交互觸感反饋 */
+.ios-tap-feedback:active {
+  transform: scale(0.96);
+  transition: transform 0.1s ease;
+}
+
+@layer components {
+  /**
+   * iOS 玻璃圖標模板
+   * 用於圓形功能按鈕，強化頂部受光面高光
+   */
+  .ios-glass-icon {
+    @apply w-9 h-9 flex items-center justify-center rounded-full transition-all active:scale-90;
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(15px) saturate(160%);
+    box-shadow: 
+      0 0 0 0.5px rgba(255, 255, 255, 0.18),         /* 外邊緣亮邊 */
+      inset 0 0.5px 1px rgba(255, 255, 255, 0.25),   /* 頂部高光 */
+      inset 0 -1px 4px rgba(0, 0, 0, 0.2);           /* 底部厚度感 */
+  }
+
+  /**
+   * 強化版：iOS 液態玻璃膠囊 (核心樣式)
+   * 模擬物理透鏡效果：極細亮邊、內發光、超高模糊
+   */
+  .ios-glass-capsule {
+    @apply flex items-center transition-all duration-300;
+    /* 1. 核心背景：維持通透感，不使用純色 */
+    background: rgba(28, 28, 30, 0.7) !important; 
+    /* 2. 液態感模糊：提高飽和度與對比度 */
+    backdrop-filter: blur(40px) saturate(180%) contrast(120%) !important;
+    
+    /* 3. 多重光影：定義玻璃的物理厚度 */
+    box-shadow: 
+      0 0 0 0.5px rgba(255, 255, 255, 0.15),         /* 0.5px 物理外邊界 */
+      inset 0 1px 1.5px rgba(255, 255, 255, 0.25),   /* 頂部受光面高光 (亮邊關鍵) */
+      inset 0 -0.5px 1px rgba(255, 255, 255, 0.1),    /* 底部微弱反光 */
+      0 20px 40px rgba(0, 0, 0, 0.4) !important;     /* 外部深邃投影 */
+  }
+
+  /**
+   * 專為選單與彈窗優化的基礎類別
+   * 整合圓角規範與佈局
+   */
+  .ios-dropdown-base {
+    @apply ios-glass-capsule !rounded-[24px] !flex-col overflow-hidden;
+  }
+}
+
+/**
+ * 數據排版規範
+ * 用於股票詳情頁面的數據網格
+ */
+.ios-data-row {
+  @apply flex justify-between items-center w-full py-1.5 border-b border-white/[0.03];
+}
+
+.ios-data-label {
+  @apply text-[#8E8E93] text-[13px] font-medium text-left pr-4 whitespace-nowrap;
+}
+
+.ios-data-value {
+  @apply text-white text-[15px] font-semibold tabular-nums text-right;
+}
+
+/* 自定義捲軸樣式 (用於彈窗內容) */
+.custom-scrollbar::-webkit-scrollbar {
+  display: block;
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}

@@ -1,26 +1,15 @@
 import { useEffect } from 'react';
 
-const useOutsideClick = (ref, callback, excludeRef) => {
+export default function useOutsideClick(ref, handler, triggerRef) {
   useEffect(() => {
-    const handleClickOutside = (event) => {
-      // 如果點擊在排除的 ref (通常是觸發按鈕) 上，不執行回調
-      if (excludeRef && excludeRef.current && excludeRef.current.contains(event.target)) {
+    const listener = (event) => {
+      if (!ref.current || ref.current.contains(event.target) || 
+          (triggerRef?.current && triggerRef.current.contains(event.target))) {
         return;
       }
-
-      if (ref.current && !ref.current.contains(event.target)) {
-        callback();
-      }
+      handler(event);
     };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('touchstart', handleClickOutside); // 支援行動裝置
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('touchstart', handleClickOutside);
-    };
-  }, [ref, callback, excludeRef]);
-};
-
-export default useOutsideClick;
+    document.addEventListener('mousedown', listener);
+    return () => document.removeEventListener('mousedown', listener);
+  }, [ref, handler, triggerRef]);
+}
