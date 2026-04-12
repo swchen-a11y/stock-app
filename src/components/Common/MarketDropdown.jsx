@@ -41,7 +41,7 @@ const MarketDropdown = ({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: -10 }}
             transition={{ type: "spring", damping: 25, stiffness: 450 }}
-            className="relative top-[150px] w-[230px] ios-dropdown-base py-2.5"
+            className="relative top-[150px] w-[230px] ios-dropdown-base py-2.5 backdrop-blur-[5px]"
             onClick={(e) => e.stopPropagation()} 
           >
             <div className="flex flex-col w-full">

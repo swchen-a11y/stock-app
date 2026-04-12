@@ -27,7 +27,7 @@ const ActionMenu = ({ isOpen, onClose, activeView, onViewChange }) => {
             exit={{ opacity: 0, scale: 0.9, y: -10, x: 10 }}
             transition={{ type: "spring", damping: 25, stiffness: 450 }}
             /* 套用 .ios-glass-capsule 並手動注入物理亮邊樣式 */
-            className="absolute top-[105px] right-6 w-[200px] ios-glass-capsule !rounded-[24px] !flex-col overflow-hidden shadow-2xl"
+            className="absolute top-[105px] right-6 w-[200px] ios-dropdown-base !rounded-[24px] !flex-col overflow-hidden shadow-2xl"
             style={{
               /* 強制注入物理亮邊與多重光影，確保邊界清晰 */
               boxShadow: `

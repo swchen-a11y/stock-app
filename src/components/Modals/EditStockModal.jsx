@@ -87,24 +87,32 @@ const EditStockModal = ({ isOpen, onClose, stock, onUpdated }) => {
             <div className="space-y-5">
               <div className="relative">
                 <label className="text-[#8E8E93] text-[12px] font-medium ml-1 mb-1.5 block">持股成本</label>
-                <input 
-                  type="number" 
-                  value={cost} 
-                  onChange={(e) => setCost(e.target.value)}
-                  placeholder="0.00"
-                  className="w-full bg-white/[0.05] border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-[#0A84FF] transition-colors tabular-nums" 
-                />
+                <div className="ios-number-input-container ios-number-input-dark">
+                  <input 
+                    type="number" 
+                    value={cost} 
+                    onChange={(e) => setCost(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full bg-white/[0.05] border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-[#0A84FF] transition-colors tabular-nums ios-number-input" 
+                  />
+                  <div className="ios-number-input-up-arrow"></div>
+                  <div className="ios-number-input-down-arrow"></div>
+                </div>
               </div>
               
               <div className="relative">
                 <label className="text-[#8E8E93] text-[12px] font-medium ml-1 mb-1.5 block">持股數量</label>
-                <input 
-                  type="number" 
-                  value={shares} 
-                  onChange={(e) => setShares(e.target.value)}
-                  placeholder="0"
-                  className="w-full bg-white/[0.05] border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-[#0A84FF] transition-colors tabular-nums" 
-                />
+                <div className="ios-number-input-container ios-number-input-dark">
+                  <input 
+                    type="number" 
+                    value={shares} 
+                    onChange={(e) => setShares(e.target.value)}
+                    placeholder="0"
+                    className="w-full bg-white/[0.05] border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-[#0A84FF] transition-colors tabular-nums ios-number-input" 
+                  />
+                  <div className="ios-number-input-up-arrow"></div>
+                  <div className="ios-number-input-down-arrow"></div>
+                </div>
               </div>
 
               <div className="relative">

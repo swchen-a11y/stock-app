@@ -188,3 +188,125 @@ export const updateWatchlistGroups = async (userId, symbol, groups) => {
     throw error;
   }
 };
+
+/**
+ * 財務相關函數
+ */
+
+/**
+ * 新增資金帳戶
+ * @param {string} userId - 用戶 ID
+ * @param {string} accountName - 帳戶名稱
+ * @param {string} currency - 幣別 (TWD, CNY, USD 等)
+ * @param {string} market - 對應市場 (TW, CN, US 等)
+ * @returns {Promise<Object>} 新增的帳戶
+ */
+export const addAccount = async (userId, accountName, currency, market) => {
+  try {
+    // 檢查是否已存在相同幣別的帳戶
+    const { data: existing } = await supabase
+      .from('accounts')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('currency', currency)
+      .single();
+
+    if (existing) {
+      throw new Error(`已存在 ${currency} 幣別的帳戶`);
+    }
+
+    const { data, error } = await supabase
+      .from('accounts')
+      .insert({
+        user_id: userId,
+        account_name: accountName,
+        currency: currency,
+        market: market,
+        balance: 0,
+        daily_pnl: 0,
+        daily_pnl_percent: 0,
+        last_balance: 0,
+        total_pnl: 0
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    console.error('Error adding account:', error);
+    throw error;
+  }
+};
+
+/**
+ * 取得用戶的所有資金帳戶
+ * @param {string} userId - 用戶 ID
+ * @returns {Promise<Array>} 資金帳戶列表
+ */
+export const fetchAccounts = async (userId) => {
+  try {
+    const { data, error } = await supabase
+      .from('accounts')
+      .select('*')
+      .eq('user_id', userId)
+      .order('currency', { ascending: true });
+
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error('Error fetching accounts:', error);
+    throw error;
+  }
+};
+
+/**
+ * 根據幣別取得資金帳戶
+ * @param {string} userId - 用戶 ID
+ * @param {string} currency - 幣別
+ * @returns {Promise<Object>} 資金帳戶
+ */
+export const fetchAccountByCurrency = async (userId, currency) => {
+  try {
+    const { data, error } = await supabase
+      .from('accounts')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('currency', currency)
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    console.error('Error fetching account by currency:', error);
+    throw error;
+  }
+};
+
+/**
+ * 更新資金帳戶餘額
+ * @param {string} userId - 用戶 ID
+ * @param {string} currency - 幣別
+ * @param {number} balance - 新的餘額
+ * @returns {Promise<Object>} 更新後的帳戶
+ */
+export const updateAccountBalance = async (userId, currency, balance) => {
+  try {
+    const { data, error } = await supabase
+      .from('accounts')
+      .update({
+        balance: balance,
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', userId)
+      .eq('currency', currency)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    console.error('Error updating account balance:', error);
+    throw error;
+  }
+};

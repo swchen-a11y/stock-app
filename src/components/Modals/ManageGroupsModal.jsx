@@ -186,7 +186,7 @@ const ManageGroupsModal = ({
                   )}
 
                   {/* 2. 我的代號列表 (移除標題，直接顯示列表內容) */}
-              <div className="w-full max-h-[35vh] overflow-y-auto custom-scrollbar overflow-x-hidden">
+              <div className="w-full max-h-[35vh] overflow-y-auto ios-scrollbar ios-scrollbar-dark overflow-x-hidden">
                 <Reorder.Group axis="y" values={editableGroups} onReorder={(newOrder) => onReorder([defaultGroup, ...newOrder])} className="w-full list-none p-0">
                   <AnimatePresence mode="popLayout">
                     {/* 如果有臨時新增的分組，先顯示它 */}

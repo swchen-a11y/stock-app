@@ -4,18 +4,20 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
+import AddMetadataModal from '../../components/Modals/AddMetadataModal';
 
 /**
- * 搜尋頁面 (iOS 原生風格)
- * 修正：移除搜尋框內按鈕，由右側 X 按鈕負責返回
+ * 搜尋視圖 (iOS 原生液態玻璃風格)
+ * 修正點：將搜尋框固定，僅讓結果列表單獨滾動，並在滑動時產生模糊效果。
  */
-export default function SearchPage() {
+export default function SearchPage({ isView = false, onBack }) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const searchTimeoutRef = useRef(null);
 
   // 1. 處理搜尋輸入與防抖
@@ -23,28 +25,24 @@ export default function SearchPage() {
     const value = e.target.value;
     setSearchQuery(value);
     
-    if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current);
-    }
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     
     searchTimeoutRef.current = setTimeout(() => {
       setDebouncedQuery(value.trim());
     }, 300);
   }, []);
 
-  // 2. 返回主頁功能
+  // 2. 處理返回邏輯
   const handleBackToMain = useCallback(() => {
-    // 先清除搜尋的 timeout，防止跳轉後仍執行搜尋
-    if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current);
-    }
-    
-    // 停止讀取狀態
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     setIsLoading(false);
     
-    // 執行跳轉
-    router.replace('/'); // 使用 replace 有時比 push 更穩定，能減少歷史堆棧衝突
-  }, [router]);
+    if (onBack) {
+      onBack(); 
+    } else {
+      router.replace('/'); 
+    }
+  }, [router, onBack]);
 
   // 3. 執行資料庫搜尋
   useEffect(() => {
@@ -62,12 +60,11 @@ export default function SearchPage() {
           .from('stock_metadata')
           .select('*')
           .or(`symbol.ilike.%${debouncedQuery}%,name.ilike.%${debouncedQuery}%`)
-          .limit(15);
+          .limit(25); // 稍微增加上限以測試滾動
 
         if (supabaseError) throw supabaseError;
         setSearchResults(data || []);
       } catch (err) {
-        console.error('搜尋錯誤:', err.message);
         setError(err.message);
         setSearchResults([]);
       } finally {
@@ -78,8 +75,8 @@ export default function SearchPage() {
     performSearch();
   }, [debouncedQuery]);
 
-  // 4. 點擊加號：新增至「我的代號」並返回主頁
-  const handleAddAndBack = useCallback(async (stock) => {
+  // 4. 新增現有股票至 watchlist
+  const handleAddExistingStock = async (stock) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -88,26 +85,25 @@ export default function SearchPage() {
         symbol: stock.symbol,
         name: stock.name,
         market: stock.market,
-        category: stock.category,
         user_id: user.id,
         group_name: ['我的代號']
       }, { onConflict: 'symbol,user_id' });
 
       if (error) throw error;
-      
-      router.push('/'); 
+      handleBackToMain(); 
     } catch (error) {
       console.error("同步失敗:", error);
     }
-  }, [router]);
+  };
 
   return (
-    <div className="min-h-screen bg-[#121212] text-white px-6 pt-16 pb-10 select-none overflow-x-hidden relative">
-      {/* 頂部導航區域 */}
-      <div className="flex items-center gap-3 mb-10">
-        {/* 搜尋框：已移除內部的清除按鈕 */}
-        <div className="flex-1 bg-[#1c1c1e] rounded-xl px-3 py-2 flex items-center border border-white/5">
-          <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 stroke-[#8E8E93] stroke-[2.5] mr-2">
+    /* 🌟 外層容器：固定全螢幕，禁止滾動，使用 Flex 佈局 */
+    <div className="fixed inset-0 h-screen w-screen bg-black text-white z-[2000] flex flex-col overflow-hidden">
+      
+      {/* 🌟 頂部搜尋列：固定在最上方，設定毛玻璃背景 */}
+      <div className="w-full pt-16 pb-4 px-6 bg-black/80 backdrop-blur-2xl border-b border-white/5 z-50 flex items-center gap-3 flex-shrink-0">
+        <div className="flex-1 bg-white/10 rounded-2xl px-4 py-2.5 flex items-center border border-white/5 group focus-within:bg-white/15 transition-all">
+          <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 stroke-white/40 stroke-[2.5] mr-3 group-focus-within:stroke-[#0A84FF] transition-colors">
             <circle cx="11" cy="11" r="8" />
             <path d="M21 21l-4.35-4.35" />
           </svg>
@@ -115,95 +111,93 @@ export default function SearchPage() {
             type="text"
             value={searchQuery}
             onChange={handleSearchChange}
-            placeholder="輸入股票代號或名稱"
-            className="flex-1 bg-transparent text-white text-[17px] outline-none placeholder:text-[#8E8E93]"
+            placeholder="搜尋代號或名稱"
+            className="flex-1 bg-transparent text-white text-[17px] outline-none placeholder:text-white/20"
             autoFocus
           />
         </div>
         
-        {/* 右側 X 按鈕：負責返回主頁的功能 */}
+        {/* 返回按鈕 */}
         <button 
           onClick={handleBackToMain}
-          className="w-10 h-10 flex items-center justify-center bg-[#1c1c1e] rounded-full border border-white/5 active:scale-90 transition-transform shadow-lg"
+          className="w-11 h-11 flex items-center justify-center bg-white/5 rounded-full border border-white/10 active:scale-90 transition-all shadow-lg"
         >
-          <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 stroke-white stroke-[2.5]">
+          <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 stroke-white/80 stroke-[2.5]">
             <path d="M18 6L6 18M6 6l12 12" />
           </svg>
         </button>
       </div>
 
-      {/* 搜尋結果列表 */}
-      <div className="flex flex-col">
-        {error ? (
-          <div className="ios-glass-capsule !rounded-[20px] p-6 my-4">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 bg-red-500/20 rounded-full flex items-center justify-center">
-                <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 stroke-red-500 stroke-2">
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M12 8v8M8 12h8" />
-                </svg>
-              </div>
-              <div>
-                <h3 className="text-white text-[17px] font-bold">搜尋錯誤</h3>
-                <p className="text-[#8E8E93] text-[15px]">{error}</p>
-              </div>
+      {/* 🌟 搜尋結果列表區域：獨立滾動區域 */}
+      <div className="flex-1 w-full overflow-y-auto ios-scrollbar px-6 pt-4 pb-24">
+        <div className="flex flex-col space-y-1">
+          {error ? (
+            <div className="p-6 bg-red-500/10 rounded-[24px] border border-red-500/20 text-center">
+              <p className="text-red-400 text-[15px] font-medium">{error}</p>
             </div>
-            <button 
-              onClick={() => setError(null)}
-              className="w-full py-3 bg-white/5 rounded-xl text-white text-[17px] font-medium active:scale-95 transition-transform"
-            >
-              重試搜尋
-            </button>
-          </div>
-        ) : isLoading ? (
-          <div className="flex justify-center py-10">
-            <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-          </div>
-        ) : searchResults.length === 0 && debouncedQuery ? (
-          <div className="ios-glass-capsule !rounded-[20px] p-8 my-4 text-center">
-            <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8 stroke-white/50 stroke-2">
-                <circle cx="11" cy="11" r="8" />
-                <path d="M21 21l-4.35-4.35" />
-              </svg>
+          ) : isLoading ? (
+            <div className="flex flex-col items-center py-20 opacity-40">
+              <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin mb-4" />
+              <span className="text-[15px]">搜尋中...</span>
             </div>
-            <h3 className="text-white text-[17px] font-bold mb-2">找不到相關股票</h3>
-            <p className="text-[#8E8E93] text-[15px]">請嘗試其他關鍵字或檢查網路連線</p>
-          </div>
-        ) : (
-          <AnimatePresence>
-            {searchResults.map((stock, i) => (
-              <motion.div
-                key={stock.symbol}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.03 }}
-                className="w-full flex items-center py-4 border-b border-white/10"
+          ) : searchResults.length === 0 && debouncedQuery ? (
+            /* 無結果：顯示新增按鈕 */
+            <div className="py-20 flex flex-col items-center justify-center">
+              <motion.button 
+                whileTap={{ scale: 0.9 }}
+                onClick={() => setIsAddModalOpen(true)}
+                className="w-20 h-20 flex items-center justify-center bg-[#0A84FF] rounded-full shadow-[0_0_30px_rgba(10,132,255,0.4)] mb-6"
               >
-                {/* 點擊加號：同步並返回 */}
-                <button 
-                  onClick={() => handleAddAndBack(stock)}
-                  className="mr-4 text-white hover:text-[#0A84FF] active:scale-90 transition-all"
+                <svg viewBox="0 0 24 24" fill="none" className="w-10 h-10 stroke-white stroke-[3]">
+                  <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+                </svg>
+              </motion.button>
+              <h3 className="text-[19px] font-bold text-white mb-2">找不到此股票</h3>
+              <p className="text-[15px] text-white/40">點擊按鈕手動新增至資料庫</p>
+            </div>
+          ) : (
+            /* 有結果：渲染列表 */
+            <AnimatePresence mode="popLayout">
+              {searchResults.map((stock, i) => (
+                <motion.div
+                  key={stock.symbol}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.02 }}
+                  className="w-full flex items-center py-4 border-b border-white/5 active:bg-white/5 transition-colors px-2 rounded-xl"
                 >
-                  <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6 stroke-current stroke-2">
-                    <circle cx="12" cy="12" r="10" />
-                    <path d="M12 8v8M8 12h8" />
-                  </svg>
-                </button>
+                  <button 
+                    onClick={() => handleAddExistingStock(stock)}
+                    className="mr-5 w-8 h-8 flex items-center justify-center bg-[#0A84FF]/10 text-[#0A84FF] rounded-full active:scale-75 transition-all flex-shrink-0"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 stroke-current stroke-[3]">
+                      <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+                    </svg>
+                  </button>
 
-                <div className="flex-1 flex flex-col items-start">
-                  <span className="text-[17px] font-bold text-white tracking-tight">{stock.name}</span>
-                  <span className="text-[13px] text-[#8E8E93] font-medium tracking-wide uppercase">{stock.symbol}</span>
-                </div>
-
-                <div className="px-2 py-0.5 bg-[#1c1c1e] rounded border border-white/10">
-                  <span className="text-[12px] text-[#8E8E93] font-bold uppercase tracking-widest">{stock.market}</span>
-                </div>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        )}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[18px] font-bold text-white tracking-tight truncate">{stock.name}</div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[13px] text-[#8E8E93] font-bold tracking-wider uppercase truncate">{stock.symbol}</span>
+                      <span className="flex-shrink-0 px-1.5 py-0.5 bg-white/5 rounded text-[10px] text-white/40 font-black uppercase tracking-widest border border-white/10">
+                        {stock.market}
+                      </span>
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          )}
+        </div>
       </div>
+
+      {/* 手動新增彈窗 (保持在最上層) */}
+      <AddMetadataModal 
+        isOpen={isAddModalOpen} 
+        onClose={() => setIsAddModalOpen(false)} 
+        initialQuery={debouncedQuery}
+        onStockAdded={handleBackToMain}
+      />
     </div>
   );
 }
