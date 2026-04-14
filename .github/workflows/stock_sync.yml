@@ -2,15 +2,13 @@ name: Stock Data Sync
 
 on:
   schedule:
-    # 這裡設定執行頻率。設定為每 5 分鐘執行一次 (UTC 時間)
-    # 這是在 GitHub 免費額度與數據即時性之間的最安全平衡點
-    - cron: '*/5 * * * *'
-  workflow_dispatch: # 允許手動從 GitHub 介面觸發
+    # 每天 UTC 01:00 - 08:05 (北京時間 09:00 - 16:05) 每 5 分鐘執行一次
+    - cron: '*/5 1-8 * * 1-5'
+  workflow_dispatch: # 允許手動觸發
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -27,7 +25,6 @@ jobs:
 
       - name: Run Sync Script
         env:
-          # 左邊是腳本讀取的變數名，右邊是 GitHub Secrets 的名稱
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python3 scripts/sync_stocks.py

@@ -7,9 +7,9 @@ import { supabase } from '../lib/supabase';
 export const AI_MODELS = [
   { id: 'gpt-4', name: 'GPT-4', description: 'OpenAI 最新模型' },
   { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', description: 'OpenAI 快速模型' },
-  { id: 'gemini-pro', name: 'Gemini Pro', description: 'Google 高級模型' },
-  { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite', description: 'Google 輕量模型' },
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Google 混合推論模型' },
+  { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite', description: 'Google 最新一代輕量領先模型' },
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: '輕量模型' },
+  { id: 'deep-research-pro-preview-12-2025', name: 'Deep Research Pro', description: '深度市場研究專用' },
   { id: 'claude-3-opus', name: 'Claude 3 Opus', description: 'Anthropic 頂級模型' },
   { id: 'claude-3-sonnet', name: 'Claude 3 Sonnet', description: 'Anthropic 平衡模型' },
 ];
@@ -46,7 +46,7 @@ export default function useSettings() {
   const [settings, setSettings] = useState({
     custom_api_key: '',
     daily_ai_usage: 0,
-    selected_model: 'gemini-2.5-flash',
+    selected_model: 'gemini-3.1-flash-lite-preview-flash',
     username: '',
   });
   const [loading, setLoading] = useState(true);
@@ -95,7 +95,7 @@ export default function useSettings() {
         setSettings({
           custom_api_key: data.custom_api_key || '',
           daily_ai_usage: data.daily_ai_usage || 0,
-          selected_model: data.selected_model || 'gemini-2.5-flash',
+          selected_model: data.selected_model || 'gemini-3.1-flash-lite-preview-flash',
           username: data.username || '',
         });
       }

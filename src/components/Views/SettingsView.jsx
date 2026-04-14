@@ -30,7 +30,7 @@ const SettingsView = () => {
   const [apiKeyEditing, setApiKeyEditing] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [showSuccessIcon, setShowSuccessIcon] = useState(false);
-  const [localAiModel, setLocalAiModel] = useState('gemini-2.5-flash');
+  const [localAiModel, setLocalAiModel] = useState('gemini-3.1-flash-lite-preview-flash');
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState('');
   

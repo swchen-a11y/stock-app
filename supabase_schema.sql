@@ -64,7 +64,7 @@ BEGIN
     NEW.id, 
     NEW.raw_user_meta_data->>'full_name', 
     NEW.raw_user_meta_data->>'avatar_url',
-    'gemini-2.5-flash',
+    'gemini-3.1-flash-lite-preview-flash',
     0
   );
 
