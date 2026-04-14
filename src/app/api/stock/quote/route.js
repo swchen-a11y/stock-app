@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 // 環境變數
 const FINMIND_API_TOKEN = process.env.FINMIND_API_TOKEN;
 
@@ -185,6 +187,11 @@ export async function GET(request) {
     }
     
     // 轉換成交量單位
+    // 確保 volume 是數字類型
+    if (typeof quoteData.volume !== 'number') {
+      quoteData.volume = 0;
+    }
+    
     const volumeData = normalizeVolume(market, quoteData.volume);
     
     const responseData = {
