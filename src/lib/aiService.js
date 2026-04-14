@@ -297,9 +297,9 @@ const callGeminiAnalysis = async (dataPackage, apiKey, forceRefresh = false) => 
       }
     };
 
-    // 調用 Gemini API - 使用 gemini-2.0-flash-exp（支援 Search Grounding）
+    // 調用 Gemini API - 使用 gemini-2.5-flash（支援 Search Grounding）
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: {

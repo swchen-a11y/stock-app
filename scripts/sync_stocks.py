@@ -1,4 +1,5 @@
 import os
+import time
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -131,28 +132,78 @@ def sync():
     print(f"📦 正在同步 {len(active_symbols)} 支股票...")
     all_data = yf.download(active_symbols, period="60d", group_by='ticker', threads=True, progress=False)
 
+    # 創建符號到項目的映射，用於獲取 updated_at
+    item_by_symbol = {item['symbol']: item for item in items}
+    
     for symbol in active_symbols:
         try:
             df = all_data[symbol].copy() if len(active_symbols) > 1 else all_data.copy()
             payload = process_indicators(df)
             if not payload: continue
 
-            # 抓取基礎財務數據 (用於 AI 分析)
-            ticker_obj = yf.Ticker(symbol)
-            inf = ticker_obj.info
+            # 檢查是否需要更新基本面數據（Low Frequency）
+            item = item_by_symbol.get(symbol)
+            need_fundamental_update = True
             
-            payload.update({
-                "market_cap": clean_val(inf.get('marketCap')),
-                "eps": clean_val(inf.get('trailingEps')),
-                "roe": clean_val(inf.get('returnOnEquity')) * 100,
-                "cash_dividend": clean_val(inf.get('dividendRate')),
-                "net_value_per_share": clean_val(inf.get('bookValue')),
-                "high_52w": clean_val(inf.get('fiftyTwoWeekHigh')),
-                "low_52w": clean_val(inf.get('fiftyTwoWeekLow')),
-                "pb_ratio": clean_val(inf.get('priceToBook')),
-                "pe_ratio": clean_val(inf.get('trailingPE')),
-                "dividend_yield": clean_val(inf.get('dividendYield')) * 100 if inf.get('dividendYield') else 0
-            })
+            if item:
+                # 檢查基本面數據是否缺失（eps 為空或0）
+                eps_missing = not item.get('eps') or float(item.get('eps') or 0) == 0
+                
+                # 檢查 updated_at 是否超過24小時
+                updated_too_old = False
+                if item.get('updated_at'):
+                    try:
+                        updated_at = datetime.datetime.fromisoformat(item['updated_at'].replace('Z', '+00:00'))
+                        now = datetime.datetime.now(pytz.utc)
+                        hours_diff = (now - updated_at).total_seconds() / 3600
+                        updated_too_old = hours_diff >= 24
+                    except Exception as e:
+                        print(f"⚠️ {symbol} 解析 updated_at 失敗: {e}")
+                        updated_too_old = True
+                
+                # 需要更新基本面數據的條件：數據缺失 或 updated_at 超過24小時
+                need_fundamental_update = eps_missing or updated_too_old
+                
+                if not need_fundamental_update:
+                    print(f"📊 {symbol} 基本面數據仍在 24 小時快取期內且數據完整，僅更新行情數據")
+                else:
+                    if eps_missing:
+                        print(f"📈 {symbol} 基本面數據缺失，觸發完整更新")
+                    else:
+                        print(f"📈 {symbol} 基本面數據已超過 24 小時，觸發完整更新")
+            else:
+                print(f"⚠️ {symbol} 未在 watchlist 中找到對應項目，進行完整更新")
+
+            # 抓取基礎財務數據 (用於 AI 分析) - 僅當需要時
+            if need_fundamental_update:
+                ticker_obj = yf.Ticker(symbol)
+                inf = ticker_obj.info
+                
+                # 修正殖利率計算邏輯
+                dividend_yield_raw = inf.get('dividendYield')
+                dividend_yield_cleaned = clean_val(dividend_yield_raw)
+                if dividend_yield_cleaned != 0:
+                    # 若原始數據 < 1 則 * 100，否則保持原樣（假設原始數據已經是百分比）
+                    if dividend_yield_cleaned < 1:
+                        dividend_yield_cleaned *= 100
+                else:
+                    dividend_yield_cleaned = 0
+                
+                payload.update({
+                    "market_cap": clean_val(inf.get('marketCap')),
+                    "eps": clean_val(inf.get('trailingEps')),
+                    "roe": clean_val(inf.get('returnOnEquity')) * 100,
+                    "cash_dividend": clean_val(inf.get('dividendRate')),
+                    "net_value_per_share": clean_val(inf.get('bookValue')),
+                    "high_52w": clean_val(inf.get('fiftyTwoWeekHigh')),
+                    "low_52w": clean_val(inf.get('fiftyTwoWeekLow')),
+                    "pb_ratio": clean_val(inf.get('priceToBook')),
+                    "pe_ratio": clean_val(inf.get('trailingPE')),
+                    "dividend_yield": dividend_yield_cleaned
+                })
+                print(f"📈 {symbol} 更新完整數據（行情 + 基本面）")
+            else:
+                print(f"📊 {symbol} 僅更新行情數據")
 
             trade_date = payload.pop("trade_date")
 
@@ -175,6 +226,9 @@ def sync():
             ).execute()
 
             print(f"✅ {symbol} 同步完成")
+            
+            # 添加延遲，降低被偵測為爬蟲的風險
+            time.sleep(1)
 
         except Exception as e:
             print(f"❌ {symbol} 失敗: {e}")
