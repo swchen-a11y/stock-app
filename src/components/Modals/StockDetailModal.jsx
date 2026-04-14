@@ -316,14 +316,6 @@ const StockDetailModal = ({ isOpen, onClose, stock, onRefresh }) => {
                       )}
                     </div>
                   </div>
-                  {aiAnalysisResult && !isAiAnalyzing && (
-                    <button 
-                      onClick={() => handleAiAnalysis(true)}
-                      className="text-[#007AFF] text-[14px] font-medium active:scale-95 transition-transform"
-                    >
-                      重新分析
-                    </button>
-                  )}
                 </div>
                 
                 <div ref={reportContainerRef} className="text-white text-[15px] leading-relaxed space-y-6">
