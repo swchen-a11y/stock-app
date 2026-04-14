@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../lib/supabase';
 import useStockData from '../hooks/useStockData';
@@ -16,9 +17,11 @@ import ActionMenu from '../components/ActionSheets/ActionMenu';
 // 視圖組件導入
 import StockListView from '../components/Views/StockListView';
 import FinanceView from '../components/Views/FinanceView';
+import SettingsView from '../components/Views/SettingsView';
 import SearchPage from './search/page'; 
 
 export default function StockApp() {
+  const router = useRouter();
   // 視圖切換狀態：'stock' | 'finance' | 'search' | 'settings'
   const [activeView, setActiveView] = useState('stock'); 
   const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
@@ -47,55 +50,53 @@ export default function StockApp() {
     }
   }, [fetchedStocks]);
 
+  const fetchGroups = useCallback(async () => {
+    const { data } = await supabase.from('user_groups').select('*').order('created_at', { ascending: true });
+    if (data && data.length > 0) setGroups(data);
+    else setGroups([{ id: 'default', name: '我的代號' }]);
+  }, [setGroups]);
+
   // 初始化登入與獲取分組
   useEffect(() => {
     const init = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        await supabase.auth.signInWithPassword({
-          email: 'vongola0504@gmail.com',
-          password: '0504swchen'
-        });
+        router.replace('/login');
+        return;
       }
       fetchGroups();
     };
     init();
-  }, []);
+  }, [fetchGroups, router]);
 
-  const fetchGroups = async () => {
-    const { data } = await supabase.from('user_groups').select('*').order('created_at', { ascending: true });
-    if (data && data.length > 0) setGroups(data);
-    else setGroups([{ id: 'default', name: '我的代號' }]);
-  };
-
-  const handleAddGroup = async (groupName) => {
+  const handleAddGroup = useCallback(async (groupName) => {
     if (!groupName || groupName.trim() === '') throw new Error('請輸入分組名稱');
     const { data: { user } } = await supabase.auth.getUser();
     await supabase.from('user_groups').insert([{ user_id: user.id, name: groupName.trim() }]);
     await fetchGroups();
-  };
+  }, [fetchGroups]);
 
-  const handleEditGroup = async (groupId, newName) => {
+  const handleEditGroup = useCallback(async (groupId, newName) => {
     await supabase.from('user_groups').update({ name: newName.trim() }).eq('id', groupId);
     await fetchGroups();
     if (selectedMarket === groups.find(g => g.id === groupId)?.name) setSelectedMarket(newName.trim());
-  };
+  }, [fetchGroups, selectedMarket, groups, setSelectedMarket]);
 
-  const handleDeleteGroup = async (groupId) => {
+  const handleDeleteGroup = useCallback(async (groupId) => {
     setDeletingGroupId(groupId);
     await supabase.from('user_groups').delete().eq('id', groupId);
     await fetchGroups();
     if (selectedMarket === groups.find(g => g.id === groupId)?.name) setSelectedMarket('我的代號');
     setDeletingGroupId(null);
-  };
+  }, [fetchGroups, selectedMarket, groups, setSelectedMarket, setDeletingGroupId]);
 
-  const handleReorder = async (newOrder) => {
+  const handleReorder = useCallback(async (newOrder) => {
     isDraggingRef.current = true;
     setLocalStocks(newOrder);
     const updates = newOrder.map((stock, index) => ({ id: stock.id, sort_order: index }));
     await supabase.from('watchlist').upsert(updates);
     isDraggingRef.current = false;
-  };
+  }, [setLocalStocks]);
 
   const handleDragStart = useCallback(() => { isDraggingRef.current = true; }, []);
   const handleDragEnd = useCallback(() => { 
@@ -106,19 +107,19 @@ export default function StockApp() {
     }
   }, []);
 
-  const handleToggleStockInGroup = async (stockId, groupName) => {
+  const handleToggleStockInGroup = useCallback(async (stockId, groupName) => {
     const target = localStocks.find(s => s.id === stockId);
     let currentGroups = Array.isArray(target.group_name) ? target.group_name : [target.group_name || '我的代號'];
     let newGroups = currentGroups.includes(groupName) ? currentGroups.filter(g => g !== groupName) : [...currentGroups, groupName];
     await supabase.from('watchlist').update({ group_name: newGroups }).eq('id', stockId);
     refresh();
-  };
+  }, [localStocks, refresh]);
 
-  const handleDeleteStock = async (stockId) => {
+  const handleDeleteStock = useCallback(async (stockId) => {
     setLocalStocks(prev => prev.filter(s => s.id !== stockId));
     await supabase.from('watchlist').delete().eq('id', stockId);
     setTimeout(() => refresh(), 300);
-  };
+  }, [setLocalStocks, refresh]);
 
   const marketList = useMemo(() => groups.map(g => g.name), [groups]);
 
@@ -138,7 +139,7 @@ export default function StockApp() {
             <header className="flex justify-between items-start mb-2">
               <div>
                 <h1 className="text-[34px] font-bold tracking-tight text-white">
-                  {activeView === 'stock' ? '股市' : '資金'}
+                  {activeView === 'stock' ? '股市' : activeView === 'finance' ? '資金' : '設定' }
                 </h1>
                 <p className="text-[#8E8E93] text-[15px] font-medium">
                   {new Date().getMonth() + 1}月{new Date().getDate()}日
@@ -194,6 +195,12 @@ export default function StockApp() {
                 <FinanceView />
               </main>
             )}
+            
+            {activeView === 'settings' && (
+              <main className="mt-4">
+                <SettingsView />
+              </main>
+            )}
           </motion.div>
         ) : (
           /* 🌟 搜尋視圖：絕對定位佔滿全螢幕，無視外層 px-4 */
@@ -208,6 +215,7 @@ export default function StockApp() {
             <SearchPage 
               isView={true} 
               onBack={() => setActiveView('stock')} 
+              onStockAdded={refresh}
             />
           </motion.div>
         )}

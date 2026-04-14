@@ -10,7 +10,7 @@ import AddMetadataModal from '../../components/Modals/AddMetadataModal';
  * 搜尋視圖 (iOS 原生液態玻璃風格)
  * 修正點：將搜尋框固定，僅讓結果列表單獨滾動，並在滑動時產生模糊效果。
  */
-export default function SearchPage({ isView = false, onBack }) {
+export default function SearchPage({ isView = false, onBack, onStockAdded }) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -18,6 +18,7 @@ export default function SearchPage({ isView = false, onBack }) {
   const [error, setError] = useState(null);
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [addingStocks, setAddingStocks] = useState(new Set());
   const searchTimeoutRef = useRef(null);
 
   // 1. 處理搜尋輸入與防抖
@@ -75,26 +76,44 @@ export default function SearchPage({ isView = false, onBack }) {
     performSearch();
   }, [debouncedQuery]);
 
-  // 4. 新增現有股票至 watchlist
-  const handleAddExistingStock = async (stock) => {
+  // 4. 新增現有股票至 watchlist（自動同步 stock_metadata 分類）
+  const handleAddExistingStock = useCallback(async (stock) => {
+    setAddingStocks(prev => new Set(prev).add(stock.symbol));
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      // 先查詢 stock_metadata 以獲取最新的分類與名稱
+      const { data: metadata, error: metadataError } = await supabase
+        .from('stock_metadata')
+        .select('category, name')
+        .eq('symbol', stock.symbol)
+        .maybeSingle();
+
+      if (metadataError) throw metadataError;
+
       const { error } = await supabase.from('watchlist').upsert({
         symbol: stock.symbol,
-        name: stock.name,
+        name: metadata?.name || stock.name,
         market: stock.market,
+        category: metadata?.category || stock.category || '',
         user_id: user.id,
         group_name: ['我的代號']
       }, { onConflict: 'symbol,user_id' });
 
       if (error) throw error;
+      if (onStockAdded) onStockAdded();
       handleBackToMain(); 
     } catch (error) {
       console.error("同步失敗:", error);
+    } finally {
+      setAddingStocks(prev => {
+        const next = new Set(prev);
+        next.delete(stock.symbol);
+        return next;
+      });
     }
-  };
+  }, [onStockAdded, handleBackToMain]);
 
   return (
     /* 🌟 外層容器：固定全螢幕，禁止滾動，使用 Flex 佈局 */
@@ -167,10 +186,11 @@ export default function SearchPage({ isView = false, onBack }) {
                   className="w-full flex items-center py-4 border-b border-white/5 active:bg-white/5 transition-colors px-2 rounded-xl"
                 >
                   <button 
-                    onClick={() => handleAddExistingStock(stock)}
-                    className="mr-5 w-8 h-8 flex items-center justify-center bg-[#0A84FF]/10 text-[#0A84FF] rounded-full active:scale-75 transition-all flex-shrink-0"
+                    onClick={() => !addingStocks.has(stock.symbol) && handleAddExistingStock(stock)}
+                    disabled={addingStocks.has(stock.symbol)}
+                    className={`mr-5 w-8 h-8 flex items-center justify-center rounded-full transition-all flex-shrink-0 ${addingStocks.has(stock.symbol) ? 'bg-[#0A84FF]/30 text-[#0A84FF]/50 cursor-not-allowed' : 'bg-[#0A84FF]/10 text-[#0A84FF] active:scale-75'}`}
                   >
-                    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 stroke-current stroke-[3]">
+                    <svg viewBox="0 0 24 24" fill="none" className={`w-5 h-5 stroke-current stroke-[3] ${addingStocks.has(stock.symbol) ? 'opacity-50' : ''}`}>
                       <path d="M12 5v14M5 12h14" strokeLinecap="round" />
                     </svg>
                   </button>

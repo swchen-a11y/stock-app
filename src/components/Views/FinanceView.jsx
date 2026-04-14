@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { MinusCircle } from 'lucide-react';
 import { supabase } from '../../lib/supabase'; 
 import AddAccountModal from '../Modals/AddAccountModal';
 import useOutsideClick from '../../hooks/useOutsideClick';
@@ -11,11 +12,20 @@ export default function FinanceView() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [targetDividend, setTargetDividend] = useState(0); 
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [accountToDelete, setAccountToDelete] = useState(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletingAccountId, setDeletingAccountId] = useState(null);
 
   // 編輯狀態
   const [isEditingBalance, setIsEditingBalance] = useState(false);
   const [isEditingTarget, setIsEditingTarget] = useState(false);
   const [tempValue, setTempValue] = useState("");
+
+  const showError = (message) => {
+    setError(message);
+    setTimeout(() => setError(null), 3000);
+  };
 
   const pickerRef = useRef(null);
   useOutsideClick(pickerRef, () => setShowPicker(false));
@@ -47,6 +57,40 @@ export default function FinanceView() {
       setLoading(false);
     }
   }, [selectedAccountId]);
+
+  // 刪除帳戶
+  const handleDeleteAccount = async () => {
+    if (!accountToDelete) return;
+    
+    try {
+      setDeletingAccountId(accountToDelete.id);
+      
+      // 獲取當前用戶以確保 RLS 安全性
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('用戶未登入');
+      
+      const { error } = await supabase
+        .from('accounts')
+        .delete()
+        .eq('id', accountToDelete.id)
+        .eq('user_id', user.id); // 確保只刪除當前用戶的帳戶
+      
+      if (error) throw error;
+      
+      // 關閉確認對話框
+      setShowDeleteConfirm(false);
+      setAccountToDelete(null);
+      
+      // 刷新帳戶列表
+      await fetchAccounts();
+      
+    } catch (err) {
+      console.error('刪除帳戶失敗:', err);
+      setError(err.message || '刪除失敗，請稍後再試');
+    } finally {
+      setDeletingAccountId(null);
+    }
+  };
 
   // 2. 獲取該市場的目標設定
   const fetchTarget = useCallback(async () => {
@@ -88,7 +132,7 @@ export default function FinanceView() {
       if (error) throw error;
       fetchAccounts(); 
     } catch (err) {
-      alert("更新餘額失敗：" + err.message);
+      showError("更新餘額失敗：" + err.message);
     } finally {
       setIsEditingBalance(false);
     }
@@ -110,11 +154,11 @@ export default function FinanceView() {
           monthly_income_target: parseFloat(tempValue),
           target_currency: activeAccount.currency,
           updated_at: new Date() 
-        }, { onConflict: 'market' });
+        }, { onConflict: 'user_id,market' });
       if (error) throw error;
       setTargetDividend(parseFloat(tempValue));
     } catch (err) {
-      alert("目標設定失敗：" + err.message);
+      showError("目標設定失敗：" + err.message);
     } finally {
       setIsEditingTarget(false);
     }
@@ -164,27 +208,56 @@ export default function FinanceView() {
                 className="relative top-[150px] min-w-[200px] max-w-[300px] z-[2001] rounded-[24px] ios-dropdown-base py-2.5 backdrop-blur-[5px]"
               >
                 <div className="py-2">
-                  {dbAccounts.map((acc) => (
-                    <button
-                      key={acc.id}
-                      onClick={() => {
-                        setSelectedAccountId(acc.id);
-                        setShowPicker(false);
-                      }}
-                      className="w-full flex items-center px-5 py-3.5 transition-all active:bg-white/10"
-                    >
-                      <div className="w-8 flex-shrink-0">
-                        {selectedAccountId === acc.id && (
-                          <motion.svg layoutId="check-icon" viewBox="0 0 24 24" fill="none" className="w-5 h-5 text-white">
-                            <path d="M20 6L9 17L4 12" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                          </motion.svg>
+                  <AnimatePresence>
+                    {dbAccounts.map((acc) => (
+                      <motion.div
+                        key={acc.id}
+                        layout
+                        initial={{ opacity: 1, height: 'auto' }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0, scale: 0.9 }}
+                        transition={{ duration: 0.2, ease: 'easeInOut' }}
+                        className="flex items-center justify-between w-full px-5 py-3.5 overflow-hidden"
+                      >
+                        <button
+                          onClick={() => {
+                            setSelectedAccountId(acc.id);
+                            setShowPicker(false);
+                          }}
+                          className="flex-1 flex items-center transition-all active:bg-white/10"
+                        >
+                          <div className="w-8 flex-shrink-0">
+                            {selectedAccountId === acc.id && (
+                              <motion.svg layoutId="check-icon" viewBox="0 0 24 24" fill="none" className="w-5 h-5 text-white">
+                                <path d="M20 6L9 17L4 12" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                              </motion.svg>
+                            )}
+                          </div>
+                          <span className={`text-[19px] tracking-tight ${selectedAccountId === acc.id ? 'text-white font-semibold' : 'text-white/80 font-medium'}`}>
+                            {acc.account_name}
+                          </span>
+                        </button>
+                        {dbAccounts.length > 1 && (
+                          <motion.button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setAccountToDelete(acc);
+                              setShowDeleteConfirm(true);
+                            }}
+                            className="ml-4 text-[20px] cursor-pointer text-ios-red disabled:opacity-30"
+                            disabled={deletingAccountId === acc.id}
+                            whileTap={{ scale: 0.9 }}
+                          >
+                            {deletingAccountId === acc.id ? (
+                              <div className="w-5 h-5 border-2 border-ios-red/30 border-t-ios-red rounded-full animate-spin" />
+                            ) : (
+                              <MinusCircle className="w-5 h-5" strokeWidth={2} />
+                            )}
+                          </motion.button>
                         )}
-                      </div>
-                      <span className={`text-[19px] tracking-tight ${selectedAccountId === acc.id ? 'text-white font-semibold' : 'text-white/80 font-medium'}`}>
-                        {acc.account_name}
-                      </span>
-                    </button>
-                  ))}
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
                   <div className="mx-5 h-[0.5px] bg-white/10 my-1" />
                   <button
                     onClick={() => {
@@ -206,6 +279,19 @@ export default function FinanceView() {
           )}
         </AnimatePresence>
       </div>
+
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="ios-liquid-glass text-ios-red text-[13px] font-medium py-2 px-4 rounded-ios-md mt-2"
+          >
+            {error}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {activeAccount ? (
         <div className="animate-in fade-in slide-in-from-bottom-1 duration-500">
@@ -311,6 +397,50 @@ export default function FinanceView() {
         onClose={() => setIsAddModalOpen(false)} 
         onAccountAdded={fetchAccounts}
       />
+
+      <AnimatePresence>
+        {showDeleteConfirm && accountToDelete && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[2002] flex items-center justify-center p-6"
+            onClick={() => setShowDeleteConfirm(false)}
+          >
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="ios-liquid-glass rounded-[24px] p-6 max-w-md w-full z-10"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-4">
+                <h3 className="text-white text-[20px] font-bold mb-2">刪除帳戶</h3>
+                <p className="text-[#8E8E93] text-[15px] font-medium">
+                  確定要刪除「{accountToDelete.account_name}」嗎？此操作無法撤銷。
+                </p>
+              </div>
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-white/10">
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="text-[#8E8E93] text-[17px] font-semibold px-5 py-3 rounded-xl active:scale-[0.96] transition-transform"
+                  disabled={deletingAccountId === accountToDelete.id}
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleDeleteAccount}
+                  className="bg-ios-red text-white text-[17px] font-semibold px-5 py-3 rounded-xl active:scale-[0.96] transition-transform disabled:opacity-50"
+                  disabled={deletingAccountId === accountToDelete.id}
+                >
+                  {deletingAccountId === accountToDelete.id ? '刪除中...' : '刪除'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

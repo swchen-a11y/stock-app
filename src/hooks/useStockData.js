@@ -47,12 +47,6 @@ export default function useStockData(selectedMarket) {
             category: stock.category || ''
           };
         });
-        
-        console.log('[useStockData] 抓取到', validatedData.length, '筆股票資料');
-        if (validatedData.length > 0) {
-          console.log('[useStockData] 第一筆資料結構:', Object.keys(validatedData[0]));
-        }
-        
         setStocks(validatedData);
       } catch (error) {
         console.error('[useStockData] 抓取失敗:', error);

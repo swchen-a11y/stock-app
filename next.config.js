@@ -21,10 +21,10 @@ const nextConfig = {
   
   // 編譯器配置
   compiler: {
-    // 移除 console.log 在生產環境
-    removeConsole: process.env.NODE_ENV === 'production' ? {
+    // 移除 console.log、info、debug，保留 error 與 warn
+    removeConsole: {
       exclude: ['error', 'warn'],
-    } : false,
+    },
   },
   
   // 環境變數配置

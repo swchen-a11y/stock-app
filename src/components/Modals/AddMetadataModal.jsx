@@ -169,7 +169,7 @@ export default function AddMetadataModal({ isOpen, onClose, initialQuery = '', o
                     className="w-full bg-white/5 border border-white/5 rounded-2xl py-3.5 px-4 outline-none focus:border-[#0A84FF] transition-colors"
                     value={formData.symbol}
                     onChange={e => handleSymbolInput(e.target.value)}
-                    placeholder="例如: 600519.SS"
+                    placeholder="例如: 2330"
                   />
                 </div>
               </div>
@@ -180,7 +180,7 @@ export default function AddMetadataModal({ isOpen, onClose, initialQuery = '', o
                   className="w-full bg-white/5 border border-white/5 rounded-2xl py-3.5 px-4 outline-none focus:border-[#0A84FF] transition-colors"
                   value={formData.name}
                   onChange={e => setFormData({...formData, name: e.target.value})}
-                  placeholder="例如: 貴州茅台"
+                  placeholder="例如: 台積電"
                 />
               </div>
 
@@ -190,7 +190,7 @@ export default function AddMetadataModal({ isOpen, onClose, initialQuery = '', o
                   className="w-full bg-white/5 border border-white/5 rounded-2xl py-3.5 px-4 outline-none focus:border-[#0A84FF] transition-colors"
                   value={formData.category}
                   onChange={e => setFormData({...formData, category: e.target.value})}
-                  placeholder="例如: 白酒"
+                  placeholder="例如: 半導體"
                 />
               </div>
 

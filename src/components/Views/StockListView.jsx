@@ -1,6 +1,6 @@
 import React from 'react';
 import { Reorder, AnimatePresence } from 'framer-motion';
-import StockItem from '../StockList/StockItem';
+import StockItem from '../Stocks/StockItem';
 
 export default function StockListView({ 
   loading, localStocks, handleReorder, handleDragStart, handleDragEnd, 
