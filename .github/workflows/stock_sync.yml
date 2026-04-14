@@ -25,10 +25,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install yfinance pandas numpy supabase python-dotenv pytz
 
-      - name: Run Sync Script
+      - name: python scripts/sync_stocks.py
         env:
           # 這裡引用 GitHub Secrets 中儲存的環境變數
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: python sync_stocks.py
+        run: python3 scripts/sync_stocks.py
