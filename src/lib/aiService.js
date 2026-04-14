@@ -17,7 +17,8 @@ const getGeminiApiKey = async (userId) => {
     const MODEL_PRIORITY = [
       profile?.selected_model,
       'gemini-3.1-flash-lite-preview',
-      
+      'gemini-2.5-flash',
+      'gemini-2.5-flash-lite',
     ].filter(model => model && model !== 'gemini-1.5-flash');
 
     return {
