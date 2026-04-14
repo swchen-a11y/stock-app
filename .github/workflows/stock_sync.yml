@@ -1,0 +1,34 @@
+name: Stock Data Sync
+
+on:
+  schedule:
+    # 這裡設定執行頻率。設定為每小時執行一次 (UTC 時間)
+    # 你可以根據股市開盤時間調整，例如：'0 1-7 * * 1-5' (台灣/大陸開盤期間)
+    - cron: '*/30 1-8 * * 1-5'
+  workflow_dispatch: # 允許手動從 GitHub 介面觸發
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install yfinance pandas numpy supabase python-dotenv pytz
+
+      - name: Run Sync Script
+        env:
+          # 這裡引用 GitHub Secrets 中儲存的環境變數
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python sync_stocks.py
