@@ -2,7 +2,7 @@ import "./globals.css"; // 確保路徑指向你的 CSS 檔案
 import ErrorBoundary from "@/components/Common/ErrorBoundary";
 
 export const metadata = {
-  title: 'iOS 股市',
+  title: '股市',
   description: 'AI 驅動的股市分析 App',
 };
 
@@ -18,6 +18,8 @@ export default function RootLayout({ children }) {
         {/* 預先載入關鍵資源 */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        {/* Apple 觸控圖示 */}
+        <link rel="stock-touch-icon" href="/stock-touch-icon.png" />
       </head>
       <body className="antialiased">
         <ErrorBoundary>
