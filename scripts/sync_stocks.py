@@ -84,6 +84,14 @@ def process_indicators(df):
     d["change_amount"] = d["current_price"] - d["prev_close"]
     d["change_percent"] = (d["change_amount"] / d["prev_close"] * 100) if d["prev_close"] != 0 else 0
     
+    if len(df) >= 10:
+        # 取最後 10 筆數據的成交量平均值
+        avg_vol_10 = df['Volume'].tail(10).mean()
+        d["avg_volume_10d"] = int(clean_val(avg_vol_10))
+    else:
+        # 若數據不足 10 筆，則取現有數據的平均值作為初始參考
+        d["avg_volume_10d"] = int(clean_val(df['Volume'].mean()))
+
     if len(df) >= 20:
         ma20 = float(close_s.rolling(window=20).mean().iloc[-1])
         std20 = float(close_s.rolling(window=20).std().iloc[-1])

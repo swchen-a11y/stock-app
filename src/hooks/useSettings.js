@@ -46,7 +46,7 @@ export default function useSettings() {
   const [settings, setSettings] = useState({
     custom_api_key: '',
     daily_ai_usage: 0,
-    selected_model: 'Gemini 2.5 Flash',
+    selected_model: 'gemini-2.5-flash',
     username: '',
   });
   const [loading, setLoading] = useState(true);
@@ -95,7 +95,7 @@ export default function useSettings() {
         setSettings({
           custom_api_key: data.custom_api_key || '',
           daily_ai_usage: data.daily_ai_usage || 0,
-          selected_model: data.selected_model || 'Gemini 2.5 Flash',
+          selected_model: data.selected_model || 'gemini-2.5-flash',
           username: data.username || '',
         });
       }

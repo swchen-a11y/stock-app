@@ -30,9 +30,15 @@ const SettingsView = () => {
   const [apiKeyEditing, setApiKeyEditing] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [showSuccessIcon, setShowSuccessIcon] = useState(false);
-  const [localAiModel, setLocalAiModel] = useState('Gemini 2.5 Flash');
+  const [localAiModel, setLocalAiModel] = useState('gemini-2.5-flash');
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState('');
+  
+  // 根據 model id 獲取顯示名稱
+  const getModelDisplayName = (modelId) => {
+    const model = AI_MODELS.find(m => m.id === modelId);
+    return model ? model.name : modelId;
+  };
   // 用戶名稱相關狀態
   const [usernameExpanded, setUsernameExpanded] = useState(false);
   const [usernameEditing, setUsernameEditing] = useState(false);
@@ -55,12 +61,12 @@ const SettingsView = () => {
   }, [settings.username]);
 
   // 處理 AI 模型選擇
-  const handleAiModelSelect = async (modelName) => {
-    setLocalAiModel(modelName);
+  const handleAiModelSelect = async (modelId) => {
+    setLocalAiModel(modelId);
     setAiModelExpanded(false);
     
-    // 更新到資料庫
-    const success = await updateSetting('selected_model', modelName);
+    // 更新到資料庫（儲存的是 id）
+    const success = await updateSetting('selected_model', modelId);
     if (success) {
       triggerSuccessFeedback();
     }
@@ -403,7 +409,7 @@ const SettingsView = () => {
                 <span className="text-[#8E8E93] text-[13px] font-medium mt-0.5">用於股票分析與建議</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-[#8E8E93] text-[15px] font-medium">{localAiModel}</span>
+                <span className="text-[#8E8E93] text-[15px] font-medium">{getModelDisplayName(localAiModel)}</span>
                 <motion.svg 
                   viewBox="0 0 24 24" 
                   fill="none" 
@@ -431,14 +437,14 @@ const SettingsView = () => {
                       <button
                         key={model.id}
                         className="w-full flex items-center justify-between py-3 px-2 rounded-lg hover:bg-white/5 active:scale-[0.98] transition-all ios-tap-feedback"
-                        onClick={() => handleAiModelSelect(model.name)}
+                        onClick={() => handleAiModelSelect(model.id)}
                         disabled={saving}
                       >
                         <div className="flex flex-col items-start">
                           <span className="text-white text-[15px] font-medium">{model.name}</span>
                           <span className="text-[#8E8E93] text-[12px] font-medium mt-0.5">{model.description}</span>
                         </div>
-                        {localAiModel === model.name && (
+                        {localAiModel === model.id && (
                           <svg 
                             viewBox="0 0 24 24" 
                             fill="none" 
