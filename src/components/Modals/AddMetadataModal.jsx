@@ -13,7 +13,6 @@ export default function AddMetadataModal({ isOpen, onClose, initialQuery = '', o
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const [isFetchingQuote, setIsFetchingQuote] = useState(false);
 
   // 判斷陸股後綴的輔助函數
   const detectCNSuffix = (symbolBase) => {
@@ -21,64 +20,6 @@ export default function AddMetadataModal({ isOpen, onClose, initialQuery = '', o
     const firstChar = symbolBase.charAt(0);
     // 滬市：6, 9 開頭；深市：0, 2, 3 開頭
     return (firstChar === '6' || firstChar === '9') ? '.SS' : '.SZ';
-  };
-
-  // 多數據源行情抓取函數
-  const fetchMarketData = async (symbol, market) => {
-    try {
-      console.log(`開始抓取市場數據: ${symbol} (${market})`);
-      
-      // 調用內部 API 路由，由伺服器端根據市場選擇數據源
-      const apiUrl = `/api/stock/quote?symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(market)}`;
-      
-      const response = await fetch(apiUrl, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (!response.ok) {
-        throw new Error(`行情 API 請求失敗: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      
-      if (!data.success) {
-        throw new Error(data.error || '未找到股票數據');
-      }
-      
-      console.log(`抓取成功: ${symbol}`, { 
-        current_price: data.current_price, 
-        prev_close: data.prev_close, 
-        volume: data.volume,
-        volume_unit: data.volume_unit,
-        source: data.source 
-      });
-      
-      return {
-        current_price: data.current_price,
-        prev_close: data.prev_close,
-        volume: data.volume, // 已轉換為市場規範單位
-        original_volume: data.original_volume, // 原始股數
-        volume_unit: data.volume_unit,
-        source: data.source,
-        success: true
-      };
-    } catch (error) {
-      console.error(`抓取市場數據失敗 (${symbol}):`, error.message);
-      return {
-        current_price: 0,
-        prev_close: 0,
-        volume: 0,
-        original_volume: 0,
-        volume_unit: '股',
-        source: 'unknown',
-        success: false,
-        error: error.message
-      };
-    }
   };
 
   // 1. 初始化邏輯
@@ -174,47 +115,8 @@ export default function AddMetadataModal({ isOpen, onClose, initialQuery = '', o
 
       if (watchError) throw watchError;
       
-      // 🌟 切換到即時行情抓取階段
-      setIsSubmitting(false);
-      setIsFetchingQuote(true);
-      
-      try {
-        console.log(`開始即時行情抓取: ${cleanSymbol} (${formData.market})`);
-        const quoteData = await fetchMarketData(cleanSymbol, formData.market);
-        
-        if (quoteData.success) {
-          // 更新 watchlist 中的即時數據
-          // 使用 original_volume (股數) 以保持與現有數據結構一致
-          const { error: updateError } = await supabase
-            .from('watchlist')
-            .update({
-              current_price: quoteData.current_price,
-              prev_close: quoteData.prev_close,
-              volume: quoteData.original_volume || quoteData.volume, // 優先使用原始股數
-              updated_at: new Date().toISOString()
-            })
-            .eq('user_id', user.id)
-            .eq('symbol', cleanSymbol);
-            
-          if (updateError) {
-            console.error('更新 watchlist 行情數據失敗:', updateError);
-          } else {
-            console.log('即時行情數據已更新到 watchlist', {
-              source: quoteData.source,
-              volume_unit: quoteData.volume_unit
-            });
-          }
-        } else {
-          console.warn(`即時行情抓取失敗: ${quoteData.error}`);
-        }
-      } catch (fetchError) {
-        console.error('即時行情抓取流程異常:', fetchError);
-        // 不拋出錯誤，確保股票新增成功
-      } finally {
-        setIsFetchingQuote(false);
-        if (onStockAdded) onStockAdded();
-        onClose();
-      }
+      if (onStockAdded) onStockAdded();
+      onClose();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -298,10 +200,10 @@ export default function AddMetadataModal({ isOpen, onClose, initialQuery = '', o
 
               <button 
                 type="submit" 
-                disabled={isSubmitting || isFetchingQuote}
+                disabled={isSubmitting}
                 className="w-full mt-6 bg-[#0A84FF] text-white py-4 rounded-2xl font-bold text-[17px] active:scale-[0.96] transition-all shadow-lg shadow-[#0A84FF]/20 disabled:opacity-50"
               >
-                {isFetchingQuote ? '正在獲取即時行情...' : (isSubmitting ? '同步處理中...' : '確認添加並加入列表')}
+                {isSubmitting ? '同步處理中...' : '確認添加並加入列表'}
               </button>
             </form>
           </motion.div>

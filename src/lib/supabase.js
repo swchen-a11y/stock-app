@@ -3,12 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-// 修正重點：顯式指定 db schema 為 'public'，防止系統誤導至 'net' schema
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  db: {
-    schema: 'public'
-  }
-});
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 /**
  * Supabase 資料庫服務層
@@ -17,6 +12,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 
 /**
  * 取得用戶的所有觀察列表項目
+ * @param {string} userId - 用戶 ID
+ * @returns {Promise<Array>} 按 sort_order 升序排列的觀察列表項目
  */
 export const fetchWatchlist = async (userId) => {
   try {
@@ -36,6 +33,8 @@ export const fetchWatchlist = async (userId) => {
 
 /**
  * 搜尋股票元數據
+ * @param {string} query - 搜尋關鍵字
+ * @returns {Promise<Array>} 搜尋結果，最多 20 筆
  */
 export const searchStocks = async (query) => {
   try {
@@ -43,7 +42,7 @@ export const searchStocks = async (query) => {
     const { data, error } = await supabase
       .from('stock_metadata')
       .select('*')
-      .or(`symbol.ilike.${searchTerm},name.ilike.${searchTerm}`)
+      .or(`symbol.ilike.${searchTerm},name_zh.ilike.${searchTerm}`)
       .order('symbol', { ascending: true })
       .limit(20);
 
@@ -57,6 +56,12 @@ export const searchStocks = async (query) => {
 
 /**
  * 新增股票到觀察列表
+ * @param {string} userId - 用戶 ID
+ * @param {string} symbol - 股票代號
+ * @param {string} market - 市場代號
+ * @param {string} name - 股票名稱
+ * @param {string} category - 產業分類
+ * @returns {Promise<Object>} 新增的項目
  */
 export const addToWatchlist = async (userId, symbol, market, name, category) => {
   try {
@@ -67,7 +72,7 @@ export const addToWatchlist = async (userId, symbol, market, name, category) => 
       .eq('user_id', userId)
       .eq('symbol', symbol)
       .eq('market', market)
-      .maybeSingle(); // 使用 maybeSingle 避免找不到時噴錯
+      .single();
 
     if (existing) {
       throw new Error('股票已在觀察列表中');
@@ -108,6 +113,10 @@ export const addToWatchlist = async (userId, symbol, market, name, category) => 
 
 /**
  * 更新觀察列表項目的排序順序
+ * @param {string} userId - 用戶 ID
+ * @param {string} symbol - 股票代號
+ * @param {number} newOrder - 新的排序順序
+ * @returns {Promise<Object>} 更新後的項目
  */
 export const updateWatchlistSort = async (userId, symbol, newOrder) => {
   try {
@@ -131,6 +140,9 @@ export const updateWatchlistSort = async (userId, symbol, newOrder) => {
 
 /**
  * 從觀察列表中移除股票
+ * @param {string} userId - 用戶 ID
+ * @param {string} symbol - 股票代號
+ * @returns {Promise<Object>} 刪除的項目
  */
 export const removeFromWatchlist = async (userId, symbol) => {
   try {
@@ -152,6 +164,10 @@ export const removeFromWatchlist = async (userId, symbol) => {
 
 /**
  * 更新觀察列表項目的分組
+ * @param {string} userId - 用戶 ID
+ * @param {string} symbol - 股票代號
+ * @param {Array<string>} groups - 分組名稱陣列
+ * @returns {Promise<Object>} 更新後的項目
  */
 export const updateWatchlistGroups = async (userId, symbol, groups) => {
   try {
@@ -179,6 +195,11 @@ export const updateWatchlistGroups = async (userId, symbol, groups) => {
 
 /**
  * 新增資金帳戶
+ * @param {string} userId - 用戶 ID
+ * @param {string} accountName - 帳戶名稱
+ * @param {string} currency - 幣別 (TWD, CNY, USD 等)
+ * @param {string} market - 對應市場 (TW, CN, US 等)
+ * @returns {Promise<Object>} 新增的帳戶
  */
 export const addAccount = async (userId, accountName, currency, market) => {
   try {
@@ -188,7 +209,7 @@ export const addAccount = async (userId, accountName, currency, market) => {
       .select('id')
       .eq('user_id', userId)
       .eq('currency', currency)
-      .maybeSingle();
+      .single();
 
     if (existing) {
       throw new Error(`已存在 ${currency} 幣別的帳戶`);
@@ -220,6 +241,8 @@ export const addAccount = async (userId, accountName, currency, market) => {
 
 /**
  * 取得用戶的所有資金帳戶
+ * @param {string} userId - 用戶 ID
+ * @returns {Promise<Array>} 資金帳戶列表
  */
 export const fetchAccounts = async (userId) => {
   try {
@@ -239,6 +262,9 @@ export const fetchAccounts = async (userId) => {
 
 /**
  * 根據幣別取得資金帳戶
+ * @param {string} userId - 用戶 ID
+ * @param {string} currency - 幣別
+ * @returns {Promise<Object>} 資金帳戶
  */
 export const fetchAccountByCurrency = async (userId, currency) => {
   try {
@@ -259,6 +285,10 @@ export const fetchAccountByCurrency = async (userId, currency) => {
 
 /**
  * 更新資金帳戶餘額
+ * @param {string} userId - 用戶 ID
+ * @param {string} currency - 幣別
+ * @param {number} balance - 新的餘額
+ * @returns {Promise<Object>} 更新後的帳戶
  */
 export const updateAccountBalance = async (userId, currency, balance) => {
   try {
