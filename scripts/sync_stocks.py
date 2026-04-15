@@ -23,14 +23,13 @@ def init_supabase():
     finmind_token = os.getenv("FINMIND_API_TOKEN")
     
     if not url or not key:
-        raise ValueError("❌ 缺失核心環境變數。")
+        raise ValueError("❌ 缺失 SUPABASE_URL 或 SUPABASE_SERVICE_KEY。")
     
     return create_client(url, key.strip()), finmind_token
 
 supabase, FINMIND_TOKEN = init_supabase()
 
 def clean_val(val, default=0.0):
-    """ 強制轉換數據並過濾異常字串 """
     if val is None or pd.isna(val) or val == "" or val == "-" or val == "None": return default
     try:
         v = float(val)
@@ -40,10 +39,11 @@ def clean_val(val, default=0.0):
 # --- 2. 數據抓取模組 (分流策略) ---
 
 def get_china_data(symbol):
-    """ 陸股優先：AkShare """
+    """ 陸股優先：AkShare (修正代碼匹配) """
     try:
         pure_code = symbol.split('.')[0]
         df_all = ak.stock_zh_a_spot_em()
+        # AkShare 官方代碼欄位為簡體「代码」
         row = df_all[df_all['代码'] == pure_code]
         if not row.empty:
             res = row.iloc[0]
@@ -64,6 +64,7 @@ def get_taiwan_data(symbol):
         if FINMIND_TOKEN: dl.login(token=FINMIND_TOKEN)
         code = symbol.split('.')[0]
         start = (datetime.datetime.now() - datetime.timedelta(days=7)).strftime('%Y-%m-%d')
+        # 獲取 PE/PB/殖利率
         df_per = dl.taiwan_stock_per_pbr(stock_id=code, start_date=start)
         if not df_per.empty:
             l = df_per.iloc[-1]
@@ -75,7 +76,7 @@ def get_taiwan_data(symbol):
     except Exception as e: print(f"⚠️ FinMind 抓取失敗 ({symbol}): {e}")
     return {}
 
-# --- 3. 市場狀態判斷 ---
+# --- 3. 市場開盤判斷 ---
 def is_market_open(market="US"):
     now = datetime.datetime.now(pytz.utc)
     if market == "US":
@@ -95,19 +96,23 @@ def is_market_open(market="US"):
             return morning or afternoon
     return True
 
-# --- 4. 同步邏輯整合 ---
+# --- 4. 同步主程序 ---
 def sync():
-    print(f"🚀 同步啟動: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"🚀 同步任務啟動: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # 獲取 Watchlist
     res = supabase.table("watchlist").select("*").execute()
     items = res.data
     if not items: return
 
+    # 篩選需要更新的符號 (開盤中或初次同步)
     active_symbols = [i['symbol'] for i in items if is_market_open(i['market']) or clean_val(i.get('current_price')) == 0]
+    
     if not active_symbols:
-        print("💤 市場休市中且數據已完整。")
+        print("💤 市場休市且數據完整，跳過同步。")
         return
 
-    # 批次下載歷史行情計算技術指標
+    # 批次下載歷史行情 (計算 RSI/MA20)
     all_history = yf.download(active_symbols, period="60d", group_by='ticker', progress=False)
 
     for item in items:
@@ -115,10 +120,11 @@ def sync():
         if symbol not in active_symbols: continue
 
         try:
+            # 取得歷史數據
             df = all_history[symbol].dropna(subset=['Close']) if len(active_symbols) > 1 else all_history.dropna(subset=['Close'])
             if df.empty: continue
             
-            # 1. 基礎行情與指標 (High Frequency)
+            # 1. 基礎行情 (High Frequency)
             last = df.iloc[-1]
             prev = df.iloc[-2]
             payload = {
@@ -129,38 +135,54 @@ def sync():
                 "updated_at": datetime.datetime.now(pytz.utc).isoformat()
             }
 
-            # 2. 判斷是否更新靜態基本面 (Low Frequency - 24H Cache)
-            last_update = datetime.datetime.fromisoformat(item.get('updated_at').replace('Z', '+00:00')) if item.get('updated_at') else None
-            needs_static = not last_update or (datetime.datetime.now(pytz.utc) - last_update).total_seconds() > 86400 or clean_val(item.get('pe_ratio')) == 0
+            # 計算技術指標
+            if len(df) >= 20:
+                ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
+                payload["ma20_distance"] = clean_val((payload["current_price"] - ma20) / ma20 * 100)
+                payload["trend_signal"] = "多頭" if payload["current_price"] > ma20 else "空頭"
+                
+                delta = df['Close'].diff()
+                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean().iloc[-1]
+                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean().iloc[-1]
+                payload["rsi_14"] = clean_val(100 - (100 / (1 + (gain/loss)))) if loss != 0 else 100
+
+            # 2. 靜態數據補全 (Low Frequency - 24H Cache)
+            last_update_str = item.get('updated_at')
+            needs_static = True
+            if last_update_str:
+                last_update = datetime.datetime.fromisoformat(last_update_str.replace('Z', '+00:00'))
+                if (datetime.datetime.now(pytz.utc) - last_update).total_seconds() < 86400 and clean_val(item.get('pe_ratio')) != 0:
+                    needs_static = False
 
             if needs_static:
-                print(f"📈 {symbol} 緩存過期，執行完整更新...")
+                print(f"📈 {symbol} 緩存過期或數據缺失，執行完整補全...")
                 
-                # 分流獲取動態基本面
+                # 分流獲取
                 region_data = {}
                 if symbol.endswith(('.SZ', '.SS')): region_data = get_china_data(symbol)
                 elif symbol.endswith(('.TW', '.TWO')): region_data = get_taiwan_data(symbol)
                 
-                # yfinance 補全與靜態數據
+                # yfinance 終極補位
                 ticker = yf.Ticker(symbol)
                 inf = ticker.info
                 static_map = {
                     "market_cap": "marketCap", "pe_ratio": "trailingPE", "pb_ratio": "priceToBook",
-                    "high_52w": "fiftyTwoWeekHigh", "low_52w": "fiftyTwoWeekLow", "eps": "trailingEps"
+                    "high_52w": "fiftyTwoWeekHigh", "low_52w": "fiftyTwoWeekLow", "eps": "trailingEps",
+                    "dividend_yield": "dividendYield"
                 }
                 
                 for db_k, yf_k in static_map.items():
                     if clean_val(region_data.get(db_k)) == 0:
-                        region_data[db_k] = clean_val(inf.get(yf_k))
+                        val = inf.get(yf_k)
+                        if db_k == "dividend_yield": val = clean_val(val) * 100
+                        region_data[db_k] = clean_val(val)
                 
                 payload.update(region_data)
-            else:
-                print(f"📊 {symbol} 僅更新即時行情。")
 
             # 3. 更新 Supabase
             supabase.table("watchlist").update(payload).eq("symbol", symbol).execute()
             print(f"✅ {symbol} 同步成功。")
-            time.sleep(1)
+            time.sleep(1) # 防禦性延遲
 
         except Exception as e:
             print(f"❌ {symbol} 失敗: {e}")
