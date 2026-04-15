@@ -64,7 +64,7 @@ def import_taiwan_stocks():
         for _, row in df.iterrows():
             stocks.append({
                 "symbol": f"{row['stock_id']}.TW",
-                "name_zh": row['stock_name'],
+                "name": row['stock_name'],
                 "market": "TW",
                 "category": row['industry_category']
             })
@@ -94,7 +94,7 @@ def import_china_stocks():
             
             stocks.append({
                 "symbol": symbol,
-                "name_zh": name_tw,
+                "name": name_tw,
                 "market": "CN",
                 "category": "A股主板" if not code.startswith('688') else "科創板"
             })

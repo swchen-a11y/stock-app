@@ -2,14 +2,15 @@ name: Stock Data Sync
 
 on:
   schedule:
-    # 台北時間 (UTC+8) 09:00 到 16:00，每 5 分鐘執行一次
-    # UTC 01:00 - 08:00 (08:00 執行最後一次，涵蓋到 16:00 之後)
-    - cron: '*/5 1-8 * * 1-5'
-  workflow_dispatch: # 保留手動觸發功能，方便測試
+    # 這裡設定執行頻率。設定為每 5 分鐘執行一次 (UTC 時間)
+    # 這是在 GitHub 免費額度與數據即時性之間的最安全平衡點
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # 允許手動從 GitHub 介面觸發
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -22,11 +23,11 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install yfinance pandas numpy supabase python-dotenv pytz akshare finmind
+          pip install yfinance pandas numpy supabase python-dotenv pytz
 
       - name: Run Sync Script
         env:
+          # 左邊是腳本讀取的變數名，右邊是 GitHub Secrets 的名稱
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          FINMIND_API_TOKEN: ${{ secrets.FINMIND_API_TOKEN }}
         run: python3 scripts/sync_stocks.py
