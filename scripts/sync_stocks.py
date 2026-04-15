@@ -4,7 +4,8 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import datetime
-import pytz
+import akshare as ak
+from finmind.data import DataLoader
 from supabase import create_client
 from dotenv import load_dotenv
 
@@ -18,121 +19,133 @@ def init_supabase():
 
     url = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
     key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    finmind_token = os.getenv("FINMIND_API_TOKEN")
     
     if not url or not key:
         raise ValueError("❌ 缺失 SUPABASE_URL 或 SUPABASE_SERVICE_KEY。")
     
-    return create_client(url, key.strip())
+    # 建立客戶端
+    client = create_client(url, key.strip())
+    return client, finmind_token
 
-supabase = init_supabase()
+# 修正：確保接收兩個回傳值
+supabase, FINMIND_TOKEN = init_supabase()
 
 def clean_val(val, default=0.0):
-    if val is None or pd.isna(val): return default
+    if val is None or pd.isna(val) or val == "" or val == "None": return default
     try:
         v = float(val)
         return v if not (np.isnan(v) or np.isinf(v)) else default
     except: return default
 
+# --- 2. 數據抓取模組 ---
+
+def get_china_data(symbol):
+    """ 陸股使用 AkShare """
+    try:
+        code = symbol.split('.')[0]
+        df = ak.stock_zh_a_spot_em()
+        row = df[df['代碼'] == code]
+        if not row.empty:
+            res = row.iloc[0]
+            return {
+                "market_cap": clean_val(res.get('總市值')),
+                "pe_ratio": clean_val(res.get('動態市盈率')),
+                "pb_ratio": clean_val(res.get('市淨率')),
+                "current_price": clean_val(res.get('最新價')),
+                "volume": int(clean_val(res.get('成交量')))
+            }
+    except Exception as e: print(f"⚠️ AkShare 失敗: {e}")
+    return {}
+
+def get_taiwan_data(symbol):
+    """ 台股使用 FinMind """
+    try:
+        dl = DataLoader()
+        if FINMIND_TOKEN: dl.login(token=FINMIND_TOKEN)
+        code = symbol.split('.')[0]
+        # 獲取最近一週的 PE/PB
+        start_date = (datetime.datetime.now() - datetime.timedelta(days=7)).strftime('%Y-%m-%d')
+        df_per = dl.taiwan_stock_per_pbr(stock_id=code, start_date=start_date)
+        
+        if not df_per.empty:
+            latest = df_per.iloc[-1]
+            return {
+                "pe_ratio": clean_val(latest.get('PE')),
+                "pb_ratio": clean_val(latest.get('PBR')),
+                "dividend_yield": clean_val(latest.get('dividend_yield'))
+            }
+    except Exception as e: print(f"⚠️ FinMind 失敗: {e}")
+    return {}
+
 def process_indicators(df):
-    """ 計算技術指標：RSI, MA20 距離, 成交量均值 """
     if df.empty or len(df) < 2: return None
-    
-    # 基本行情
     latest = df.iloc[-1]
     prev = df.iloc[-2]
-    
     current_price = clean_val(latest['Close'])
     prev_close = clean_val(prev['Close'])
-    change_pct = ((current_price - prev_close) / prev_close * 100) if prev_close != 0 else 0
     
     d = {
         "current_price": current_price,
         "prev_close": prev_close,
-        "change_percent": change_pct,
+        "change_percent": ((current_price - prev_close) / prev_close * 100) if prev_close != 0 else 0,
         "open_price": clean_val(latest['Open']),
         "day_high": clean_val(latest['High']),
         "day_low": clean_val(latest['Low']),
         "volume": int(clean_val(latest['Volume'])),
         "trade_date": latest.name.strftime('%Y-%m-%d')
     }
-
-    # 計算 10 日平均成交量 (補全資料庫缺失)
-    if len(df) >= 10:
-        d["avg_volume_10d"] = int(df['Volume'].tail(10).mean())
-    
-    # 計算 RSI (14)
-    if len(df) >= 15:
-        delta = df['Close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
-        d["rsi_14"] = clean_val(100 - (100 / (1 + rs)).iloc[-1])
-    
-    # 計算 MA20 乖離率
-    if len(df) >= 20:
-        ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
-        d["ma20_distance"] = ((current_price - ma20) / ma20 * 100) if ma20 != 0 else 0
-        
     return d
 
+# --- 3. 主程序 ---
+
 def sync():
-    print(f"🚀 開始同步任務: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # 獲取觀察清單中的所有股票
+    print(f"🚀 同步開始: {datetime.datetime.now()}")
     res = supabase.table("watchlist").select("symbol").execute()
     active_symbols = [r['symbol'] for r in res.data]
-    
-    if not active_symbols:
-        print("ℹ️ 觀察清單為空，跳過同步。")
-        return
+    if not active_symbols: return
 
-    # 一次性下載 60 天歷史數據 (用於計算 RSI 與 MA20)
-    all_data = yf.download(active_symbols, period="60d", group_by='ticker', threads=True, progress=False)
+    all_history = yf.download(active_symbols, period="60d", group_by='ticker', progress=False)
 
     for symbol in active_symbols:
         try:
-            df = all_data[symbol] if len(active_symbols) > 1 else all_data
+            df = all_history[symbol] if len(active_symbols) > 1 else all_history
             df = df.dropna(subset=['Close'])
-            
             payload = process_indicators(df)
             if not payload: continue
 
-            # 抓取基本面 (每小時或每天才更新一次以節省資源，這裡設定為 1/12 機率觸發，約一小時一次)
-            if datetime.datetime.now().minute % 60 < 5:
-                ticker_obj = yf.Ticker(symbol)
-                inf = ticker_obj.info
-                payload.update({
-                    "market_cap": clean_val(inf.get('marketCap')),
-                    "eps": clean_val(inf.get('trailingEps')),
-                    "roe": clean_val(inf.get('returnOnEquity', 0)) * 100,
-                    "cash_dividend": clean_val(inf.get('dividendRate')),
-                    "dividend_yield": clean_val(inf.get('dividendYield', 0)) * 100,
-                    "high_52w": clean_val(inf.get('fiftyTwoWeekHigh')),
-                    "low_52w": clean_val(inf.get('fiftyTwoWeekLow')),
-                    "pe_ratio": clean_val(inf.get('trailingPE')),
-                    "pb_ratio": clean_val(inf.get('priceToBook'))
-                })
+            final_info = {}
+            if symbol.endswith('.SZ') or symbol.endswith('.SS'):
+                final_info = get_china_data(symbol)
+            elif symbol.endswith('.TW') or symbol.endswith('.TWO'):
+                final_info = get_taiwan_data(symbol)
 
+            # yfinance 補全
+            ticker_obj = yf.Ticker(symbol)
+            inf = ticker_obj.info
+            
+            mapping = {
+                "market_cap": "marketCap", "pe_ratio": "trailingPE",
+                "pb_ratio": "priceToBook", "high_52w": "fiftyTwoWeekHigh",
+                "low_52w": "fiftyTwoWeekLow", "eps": "trailingEps",
+                "roe": "returnOnEquity", "dividend_yield": "dividendYield"
+            }
+
+            for db_key, yf_key in mapping.items():
+                if clean_val(final_info.get(db_key)) == 0:
+                    val = inf.get(yf_key)
+                    if db_key in ["roe", "dividend_yield"]: val = clean_val(val) * 100
+                    final_info[db_key] = clean_val(val)
+
+            payload.update(final_info)
             trade_date = payload.pop("trade_date")
 
-            # 1. 更新 Watchlist (包含技術指標與現價)
             supabase.table("watchlist").update(payload).eq("symbol", symbol).execute()
-
-            # 2. 寫入歷史快取
-            history_payload = {
-                "symbol": symbol,
-                "trade_date": trade_date,
-                "close_price": payload["current_price"],
-                "volume": payload["volume"],
-                "change_percent": payload["change_percent"]
-            }
-            supabase.table("stock_history").upsert(history_payload, on_conflict="symbol, trade_date").execute()
-
-            print(f"✅ {symbol} 同步完成 (Price: {payload['current_price']})")
-            time.sleep(0.5) # 稍微延遲
+            print(f"✅ {symbol} 更新成功")
+            time.sleep(1)
 
         except Exception as e:
-            print(f"❌ {symbol} 同步出錯: {str(e)}")
+            print(f"❌ {symbol} 錯誤: {e}")
 
 if __name__ == "__main__":
     sync()
