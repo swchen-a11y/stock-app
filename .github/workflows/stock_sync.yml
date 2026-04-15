@@ -2,9 +2,10 @@ name: Stock Data Sync
 
 on:
   schedule:
-    # 每天 UTC 01:00 - 08:05 (北京時間 09:00 - 16:05) 每 5 分鐘執行一次
+    # 台北時間 (UTC+8) 09:00 到 16:00，每 5 分鐘執行一次
+    # UTC 01:00 - 08:00 (08:00 執行最後一次，涵蓋到 16:00 之後)
     - cron: '*/5 1-8 * * 1-5'
-  workflow_dispatch: # 允許手動觸發
+  workflow_dispatch: # 保留手動觸發功能，方便測試
 
 jobs:
   build:
@@ -21,10 +22,11 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install yfinance pandas numpy supabase python-dotenv pytz
+          pip install yfinance pandas numpy supabase python-dotenv pytz akshare finmind
 
       - name: Run Sync Script
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          FINMIND_API_TOKEN: ${{ secrets.FINMIND_API_TOKEN }}
         run: python3 scripts/sync_stocks.py
