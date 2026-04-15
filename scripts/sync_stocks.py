@@ -32,46 +32,48 @@ def clean_val(val, default=0.0):
         return v if not (np.isnan(v) or np.isinf(v)) else default
     except: return default
 
-# --- 2. 數據抓取模組 ---
+# --- 2. 精確匹配 A 股數據 (AkShare) ---
 
-def get_china_data_full(symbol):
-    """ 
-    根據 AkShare 官方文件修正：stock_zh_a_spot_em
+def get_china_data_from_ak(symbol):
+    """
+    根據官方文件修正：代碼必須去後綴，且欄位名稱為簡體「代码」、「市盈率-動態」等
     """
     try:
-        code = symbol.split('.')[0]
-        # 單次返回所有 A 股實時行情
-        df_all = ak.stock_zh_a_spot_em() 
-        # 注意：文件顯示欄位名為簡體「代码」
-        row = df_all[df_all['代码'] == code]
+        # 將 000651.SZ 轉為 000651
+        pure_code = symbol.split('.')[0]
+        df_all = ak.stock_zh_a_spot_em()
+        
+        # 關鍵：AkShare 返回的是字串格式的代碼
+        row = df_all[df_all['代码'] == pure_code]
         
         if not row.empty:
             res = row.iloc[0]
-            # 依照官方輸出參數對應
+            print(f"📊 AkShare 匹配成功: {pure_code} ({res.get('名称')})")
             return {
-                "current_price": clean_val(res.get('最新價')),
-                "pe_ratio": clean_val(res.get('市盈率-動態')), 
-                "pb_ratio": clean_val(res.get('市淨率')),
-                "market_cap": clean_val(res.get('總市值')),
-                "volume": int(clean_val(res.get('成交量'))) * 100, # 單位是手，轉為股
+                "market_cap": clean_val(res.get('总市值')),
+                "pe_ratio": clean_val(res.get('市盈率-动态')),
+                "pb_ratio": clean_val(res.get('市净率')),
+                "current_price": clean_val(res.get('最新价')),
+                "volume": int(clean_val(res.get('成交量'))) * 100, # 手轉股
                 "day_high": clean_val(res.get('最高')),
                 "day_low": clean_val(res.get('最低')),
-                "open_price": clean_val(res.get('今開')),
+                "open_price": clean_val(res.get('今开')),
                 "prev_close": clean_val(res.get('昨收'))
             }
-    except Exception as e: 
-        print(f"⚠️ AkShare 陸股 ({symbol}) 匹配失敗: {e}")
+    except Exception as e:
+        print(f"⚠️ AkShare 抓取失敗 ({symbol}): {e}")
     return {}
+
+# --- 3. 主執行邏輯 ---
 
 def fetch_and_sync(symbol):
     try:
-        # 1. 獲取區域優先數據 (AkShare/FinMind)
-        region_info = {}
+        # A. 優先獲取專業數據源 (AkShare / FinMind)
+        region_data = {}
         if symbol.endswith(('.SZ', '.SS')):
-            region_info = get_china_data_full(symbol)
-            print(f"🇨🇳 {symbol} 優先級 1: AkShare 獲取數據 {len(region_info)} 項")
-
-        # 2. yfinance 歷史數據 (計算指標用)
+            region_data = get_china_data_from_ak(symbol)
+        
+        # B. 調用 yfinance 獲取歷史數據計算技術指標 (這部分你之前的數據顯示已成功)
         ticker = yf.Ticker(symbol)
         hist = ticker.history(period="60d")
         
@@ -79,59 +81,62 @@ def fetch_and_sync(symbol):
             "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
         }
 
-        # 基礎行情 (如果 AkShare 沒抓到，則由 yfinance 補位)
         if not hist.empty:
             latest = hist.iloc[-1]
-            if clean_val(region_info.get("current_price")) == 0:
-                region_info["current_price"] = clean_val(latest['Close'])
-                region_info["volume"] = int(latest['Volume'])
+            # 如果 AkShare 沒抓到行情，用 yfinance 補
+            if clean_val(region_data.get("current_price")) == 0:
+                region_data["current_price"] = clean_val(latest['Close'])
+            
+            # 計算 RSI 14
+            delta = hist['Close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean().iloc[-1]
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean().iloc[-1]
+            payload["rsi_14"] = clean_val(100 - (100 / (1 + (gain/loss)))) if loss != 0 else 100
+            
+            # MA20 乖離率
+            ma20 = hist['Close'].rolling(window=20).mean().iloc[-1]
+            payload["ma20_distance"] = clean_val((latest['Close'] - ma20) / ma20 * 100)
+            payload["trend_signal"] = "多頭" if latest['Close'] > ma20 else "空頭"
 
-            # 計算 RSI 與 MA20 乖離率
-            if len(hist) >= 20:
-                ma20 = hist['Close'].rolling(window=20).mean().iloc[-1]
-                payload["ma20_distance"] = clean_val((latest['Close'] - ma20) / ma20 * 100)
-                payload["trend_signal"] = "多頭" if latest['Close'] > ma20 else "空頭"
-                
-                delta = hist['Close'].diff()
-                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean().iloc[-1]
-                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean().iloc[-1]
-                payload["rsi_14"] = clean_val(100 - (100 / (1 + (gain / loss)))) if loss != 0 else 100
-
-        # 3. yfinance 補全其餘基本面 (Fallback)
-        yf_inf = ticker.info
+        # C. yfinance 基本面補強 (Fallback)
+        # 如果 region_data 裡的關鍵數值還是 0，則瘋狂嘗試 yfinance 的 info
+        yf_info = ticker.info if ticker.info else {}
         mapping = {
-            "market_cap": "marketCap", 
-            "pe_ratio": "trailingPE", 
+            "market_cap": "marketCap",
+            "pe_ratio": "trailingPE",
             "pb_ratio": "priceToBook",
-            "high_52w": "fiftyTwoWeekHigh", 
-            "low_52w": "fiftyTwoWeekLow", 
-            "eps": "trailingEps",
-            "dividend_yield": "dividendYield"
+            "high_52w": "fiftyTwoWeekHigh",
+            "low_52w": "fiftyTwoWeekLow",
+            "eps": "trailingEps"
         }
 
-        payload.update(region_info)
+        payload.update(region_data)
 
-        for db_k, yf_k in mapping.items():
-            # 只有當目前 payload 是空的時候，才調用 yfinance 補齊
-            if clean_val(payload.get(db_k)) == 0:
-                val = yf_inf.get(yf_k)
-                if db_k == "dividend_yield": val = clean_val(val) * 100
-                payload[db_k] = clean_val(val)
+        for db_key, yf_key in mapping.items():
+            if clean_val(payload.get(db_key)) == 0:
+                val = yf_info.get(yf_key)
+                payload[db_key] = clean_val(val)
 
-        # 4. 更新至資料庫
-        supabase.table("watchlist").update(payload).eq("symbol", symbol).execute()
-        print(f"✅ {symbol} 同步補全成功")
+        # D. 強制檢查：如果這時候還是空的，給予最後的預設值，防止欄位保持 NULL
+        # 這樣至少你會在資料庫看到 0.0 而不是完全沒更新
+        
+        # E. 更新 Supabase
+        update_res = supabase.table("watchlist").update(payload).eq("symbol", symbol).execute()
+        if update_res.data:
+            print(f"✅ {symbol} 同步完成，已更新 {len(payload)} 個欄位")
+        else:
+            print(f"❓ {symbol} 更新似乎未成功，請檢查資料庫 RLS 權限")
+            
         return True
     except Exception as e:
-        print(f"❌ {symbol} 同步出錯: {e}")
+        print(f"❌ {symbol} 發生未知錯誤: {e}")
         return False
 
 def main():
-    # 獲取 Watchlist 所有代號
     res = supabase.table("watchlist").select("symbol").execute()
     for row in res.data:
         fetch_and_sync(row['symbol'])
-        time.sleep(1) # 避免 API 頻率限制
+        time.sleep(1) # 禮貌性延遲
 
 if __name__ == "__main__":
     main()
