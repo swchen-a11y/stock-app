@@ -38,31 +38,7 @@ def clean_val(val, default=0.0):
         return v if not (np.isnan(v) or np.isinf(v)) else default
     except: return default
 
-# --- 2. 市場開盤判斷 ---
-def is_market_open(market="US"):
-    now = datetime.datetime.now(pytz.utc)
-    
-    if market == "US":
-        et_tz = pytz.timezone('US/Eastern')
-        now_et = now.astimezone(et_tz)
-        if now_et.weekday() >= 5: return False
-        return datetime.time(9, 30) <= now_et.time() <= datetime.time(17, 0)
-    
-    elif market in ["TW", "CN"]:
-        tw_tz = pytz.timezone('Asia/Taipei')
-        now_tw = now.astimezone(tw_tz)
-        if now_tw.weekday() >= 5: return False
-        t = now_tw.time()
-        if market == "TW":
-            return datetime.time(9, 0) <= t <= datetime.time(14, 30)
-        elif market == "CN":
-            morning = datetime.time(9, 30) <= t <= datetime.time(11, 30)
-            afternoon = datetime.time(13, 0) <= t <= datetime.time(16, 0)
-            return morning or afternoon
-            
-    return True
-
-# --- 3. 技術指標計算 ---
+# --- 2. 技術指標計算 ---
 def process_indicators(df):
     if df.empty or len(df) < 2: return None
     
@@ -111,7 +87,7 @@ def process_indicators(df):
     
     return d
 
-# --- 4. 同步主程序 ---
+# --- 3. 同步主程序 ---
 def sync():
     print(f"🚀 同步任務啟動: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
@@ -126,16 +102,8 @@ def sync():
         print("⚠️ Watchlist 為空。")
         return
 
-    active_symbols = []
-    for i in items:
-        # 強制更新條件：開盤中、無數據或為了初始化
-        if is_market_open(i['market']) or i.get('current_price') == 0 or i.get('current_price') is None:
-            active_symbols.append(i['symbol'])
-    
-    active_symbols = list(set(active_symbols))
-    if not active_symbols:
-        print("💤 所有市場休市中。")
-        return
+    # 移除市場時間判斷，直接同步所有股票
+    active_symbols = list(set([item['symbol'] for item in items]))
 
     print(f"📦 正在同步 {len(active_symbols)} 支股票...")
     all_data = yf.download(active_symbols, period="60d", group_by='ticker', threads=True, progress=False)
@@ -191,7 +159,7 @@ def sync():
                 dividend_yield_raw = inf.get('dividendYield')
                 dividend_yield_cleaned = clean_val(dividend_yield_raw)
                 if dividend_yield_cleaned != 0:
-                    # 若原始數據 < 1 則 * 100，否則保持原樣（假設原始數據已經是百分比）
+                    # 若原始數據 < 1 則 * 100，否則保持原樣
                     if dividend_yield_cleaned < 1:
                         dividend_yield_cleaned *= 100
                 else:
