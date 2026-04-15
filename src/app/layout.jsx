@@ -1,34 +1,39 @@
-import "./globals.css"; // 確保路徑指向你的 CSS 檔案
+import "./globals.css";
 import ErrorBoundary from "@/components/Common/ErrorBoundary";
 
 export const metadata = {
-  title: '股市',
-  description: 'AI 驅動的股市分析 App',
+  title: "股市",
+  description: "AI 驅動的股市分析 App",
+  // 透過 Next.js Metadata API 定義行動端設定
+  appleWebApp: {
+    capable: true,
+    title: "股市",
+    statusBarStyle: "black-translucent",
+  },
 };
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="zh-TW">
+    <html lang="zh-TW" className="dark">
       <head>
-        {/* 防止行動端自動縮放 */}
-        <meta 
-          name="viewport" 
-          content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0, viewport-fit=cover" 
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0, viewport-fit=cover"
         />
+        {/* 核心：允許網頁以全螢幕模式運行 (Standalone) */}
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         
-        {/* 修正後的 Apple 觸控圖示 (關鍵在 rel 必須是 apple-touch-icon) */}
         <link rel="apple-touch-icon" href="/stock-touch-icon.png" />
         
-        {/* 如果你想讓標題更專業，可以加這行 */}
-        <meta name="apple-mobile-web-app-title" content="股市" />
-        
-        {/* 預先載入關鍵資源 */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
-      <body className="antialiased">
+      <body className="antialiased overflow-hidden fixed inset-0 w-full h-full touch-none">
         <ErrorBoundary>
-          {children}
+          <main className="h-screen w-screen overflow-y-auto scrolling-touch">
+            {children}
+          </main>
         </ErrorBoundary>
       </body>
     </html>
