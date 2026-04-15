@@ -9,7 +9,7 @@ from finmind.data import DataLoader
 from supabase import create_client
 from dotenv import load_dotenv
 
-# --- 1. 初始化 ---
+# --- 1. 初始化環境 ---
 def init_supabase():
     current_file = os.path.abspath(__file__)
     root_dir = os.path.dirname(os.path.dirname(current_file))
@@ -32,102 +32,102 @@ def clean_val(val, default=0.0):
         return v if not (np.isnan(v) or np.isinf(v)) else default
     except: return default
 
-# --- 2. AkShare 官方名稱抓取與轉換 ---
+# --- 2. 強化版數據抓取 ---
 
-def get_china_data_with_mapping(symbol):
-    """
-    依照 AkShare 官方輸出參數名稱抓取，再轉換為資料庫欄位
-    """
+def get_region_data(symbol):
+    """ 根據市場取得優先數據，若失敗回傳空字典 """
+    res = {}
     try:
-        pure_code = symbol.split('.')[0]
-        df_all = ak.stock_zh_a_spot_em()
-        # 官方文件代碼欄位為簡體「代码」
-        row = df_all[df_all['代码'] == pure_code]
-        
-        if not row.empty:
-            res = row.iloc[0]
-            print(f"📊 成功匹配 A 股: {pure_code} ({res.get('名称')})")
-            
-            # 建立「官方名稱 -> 你的資料庫欄位」映射表
-            official_mapping = {
-                "最新价": "current_price",
-                "昨收": "prev_close",
-                "今开": "open_price",
-                "最高": "day_high",
-                "最低": "day_low",
-                "成交量": "volume",
-                "总市值": "market_cap",
-                "市盈率-动态": "pe_ratio",
-                "市净率": "pb_ratio",
-                "漲跌幅": "change_percent"
-            }
-            
-            converted_data = {}
-            for off_key, db_key in official_mapping.items():
-                val = res.get(off_key)
-                if off_key == "成交量":
-                    converted_data[db_key] = int(clean_val(val)) * 100 # 手轉股
-                else:
-                    converted_data[db_key] = clean_val(val)
-            
-            return converted_data
+        if symbol.endswith(('.SZ', '.SS')):
+            # 陸股：AkShare
+            pure_code = symbol.split('.')[0]
+            df_all = ak.stock_zh_a_spot_em()
+            row = df_all[df_all['代码'] == pure_code]
+            if not row.empty:
+                r = row.iloc[0]
+                res = {
+                    "pe_ratio": clean_val(r.get('市盈率-动态')),
+                    "pb_ratio": clean_val(r.get('市净率')),
+                    "market_cap": clean_val(r.get('总市值'))
+                }
+        elif symbol.endswith(('.TW', '.TWO')):
+            # 台股：FinMind
+            dl = DataLoader()
+            if FINMIND_TOKEN: dl.login(token=FINMIND_TOKEN)
+            code = symbol.split('.')[0]
+            start = (datetime.datetime.now() - datetime.timedelta(days=7)).strftime('%Y-%m-%d')
+            df_per = dl.taiwan_stock_per_pbr(stock_id=code, start_date=start)
+            if not df_per.empty:
+                l = df_per.iloc[-1]
+                res = {
+                    "pe_ratio": clean_val(l.get('PE')),
+                    "pb_ratio": clean_val(l.get('PBR')),
+                    "dividend_yield": clean_val(l.get('dividend_yield'))
+                }
     except Exception as e:
-        print(f"⚠️ AkShare 抓取/轉換失敗 ({symbol}): {e}")
-    return {}
-
-# --- 3. 執行主同步 ---
+        print(f"⚠️ 區域來源抓取失敗 ({symbol}): {e}")
+    return res
 
 def fetch_and_sync(symbol):
     try:
+        # 1. 取得歷史數據計算技術指標 (這部分你目前是成功的)
         ticker = yf.Ticker(symbol)
-        # 這裡改用 1d 獲取最即時的 52 週資訊（yfinance info 抓取較全）
-        yf_info = ticker.info if ticker.info else {}
-        
-        # A. 優先獲取陸股數據 (AkShare)
-        payload = {}
-        if symbol.endswith(('.SZ', '.SS')):
-            payload = get_china_data_with_mapping(symbol)
-        
-        # B. 歷史指標計算 (RSI, MA20) - 這部分你目前的資料是有值的
         hist = ticker.history(period="60d")
-        if not hist.empty:
-            latest = hist.iloc[-1]
-            ma20 = hist['Close'].rolling(window=20).mean().iloc[-1]
-            payload["ma20_distance"] = clean_val((latest['Close'] - ma20) / ma20 * 100)
-            
-            delta = hist['Close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean().iloc[-1]
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean().iloc[-1]
-            payload["rsi_14"] = clean_val(100 - (100 / (1 + (gain/loss)))) if loss != 0 else 100
-            payload["trend_signal"] = "多頭" if latest['Close'] > ma20 else "空頭"
+        if hist.empty: return False
+        
+        latest = hist.iloc[-1]
+        prev = hist.iloc[-2]
+        
+        payload = {
+            "current_price": clean_val(latest['Close']),
+            "prev_close": clean_val(prev['Close']),
+            "open_price": clean_val(latest['Open']),
+            "day_high": clean_val(latest['High']),
+            "day_low": clean_val(latest['Low']),
+            "volume": int(latest['Volume']),
+            "change_percent": ((latest['Close'] - prev['Close']) / prev['Close'] * 100),
+            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        }
 
-        # C. yfinance 二次補全 (Fallback)
-        # 針對 high_52w, low_52w, eps 等 AkShare 實時行情沒提供的欄位
-        fallback_mapping = {
-            "high_52w": "fiftyTwoWeekHigh",
-            "low_52w": "fiftyTwoWeekLow",
+        # 計算 RSI 與 MA20 乖離
+        if len(hist) >= 20:
+            ma20 = hist['Close'].rolling(window=20).mean().iloc[-1]
+            payload["ma20_distance"] = clean_val((payload["current_price"] - ma20) / ma20 * 100)
+            payload["trend_signal"] = "多頭" if payload["current_price"] > ma20 else "空頭"
+
+        # 2. 獲取優先來源數據
+        primary_data = get_region_data(symbol)
+        payload.update(primary_data)
+
+        # 3. ！！關鍵補全邏輯！！：使用 yfinance 補齊所有還是 0 的欄位
+        yf_info = ticker.info if ticker.info else {}
+        mapping = {
             "market_cap": "marketCap",
             "pe_ratio": "trailingPE",
+            "pb_ratio": "priceToBook",
+            "high_52w": "fiftyTwoWeekHigh",
+            "low_52w": "fiftyTwoWeekLow",
             "eps": "trailingEps",
             "dividend_yield": "dividendYield"
         }
 
-        for db_k, yf_k in fallback_mapping.items():
-            # 如果目前 payload 沒這項數據或是 0，就嘗試用 yfinance 補
-            if clean_val(payload.get(db_k)) == 0:
-                val = yf_info.get(yf_k)
-                if db_k == "dividend_yield": val = clean_val(val) * 100
-                payload[db_k] = clean_val(val)
+        for db_key, yf_key in mapping.items():
+            # 檢查目前 payload 裡該欄位是否為 0 或不存在
+            if clean_val(payload.get(db_key)) == 0:
+                val = yf_info.get(yf_key)
+                if db_key == "dividend_yield": val = clean_val(val) * 100
+                payload[db_key] = clean_val(val)
+                # 如果 yfinance 補成功了，印出來確認
+                if payload[db_key] != 0:
+                    print(f"🔹 {symbol} 的 {db_key} 由 yfinance 補全成功")
 
-        payload["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-
-        # D. 更新至 Supabase
-        res = supabase.table("watchlist").update(payload).eq("symbol", symbol).execute()
-        if res.data:
-            print(f"✅ {symbol} 同步成功，包含欄位: {list(payload.keys())}")
+        # 4. 更新至資料庫
+        supabase.table("watchlist").update(payload).eq("symbol", symbol).execute()
+        print(f"✅ {symbol} 同步完成 (Price: {payload['current_price']})")
         return True
+
     except Exception as e:
-        print(f"❌ {symbol} 同步失敗: {e}")
+        print(f"❌ {symbol} 發生錯誤: {e}")
         return False
 
 def main():
