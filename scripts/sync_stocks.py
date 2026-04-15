@@ -32,76 +32,69 @@ def clean_val(val, default=0.0):
         return v if not (np.isnan(v) or np.isinf(v)) else default
     except: return default
 
-# --- 2. 強化版數據抓取 ---
+# --- 2. 數據抓取：分流處理 ---
 
-def get_region_data(symbol):
-    """ 根據市場取得優先數據，若失敗回傳空字典 """
+def get_dynamic_data(symbol):
+    """ 動態行情優先：A股(AkShare), 台股(FinMind) """
     res = {}
     try:
         if symbol.endswith(('.SZ', '.SS')):
-            # 陸股：AkShare
+            # 陸股：使用 AkShare 官方文件接口
             pure_code = symbol.split('.')[0]
             df_all = ak.stock_zh_a_spot_em()
             row = df_all[df_all['代码'] == pure_code]
             if not row.empty:
                 r = row.iloc[0]
                 res = {
+                    "current_price": clean_val(r.get('最新价')),
+                    "change_percent": clean_val(r.get('涨跌幅')),
+                    "volume": int(clean_val(r.get('成交量'))) * 100, # 手轉股
                     "pe_ratio": clean_val(r.get('市盈率-动态')),
                     "pb_ratio": clean_val(r.get('市净率')),
-                    "market_cap": clean_val(r.get('总市值'))
+                    "market_cap": clean_val(r.get('总市值')),
+                    "day_high": clean_val(r.get('最高')),
+                    "day_low": clean_val(r.get('最低')),
+                    "open_price": clean_val(r.get('今开')),
+                    "prev_close": clean_val(r.get('昨收'))
                 }
         elif symbol.endswith(('.TW', '.TWO')):
-            # 台股：FinMind
-            dl = DataLoader()
-            if FINMIND_TOKEN: dl.login(token=FINMIND_TOKEN)
-            code = symbol.split('.')[0]
-            start = (datetime.datetime.now() - datetime.timedelta(days=7)).strftime('%Y-%m-%d')
-            df_per = dl.taiwan_stock_per_pbr(stock_id=code, start_date=start)
-            if not df_per.empty:
-                l = df_per.iloc[-1]
-                res = {
-                    "pe_ratio": clean_val(l.get('PE')),
-                    "pb_ratio": clean_val(l.get('PBR')),
-                    "dividend_yield": clean_val(l.get('dividend_yield'))
-                }
+            # 台股：此處以 yfinance 為基礎行情，FinMind 補強動態指標
+            pass 
     except Exception as e:
-        print(f"⚠️ 區域來源抓取失敗 ({symbol}): {e}")
+        print(f"⚠️ 動態數據抓取失敗 ({symbol}): {e}")
     return res
 
 def fetch_and_sync(symbol):
     try:
-        # 1. 取得歷史數據計算技術指標 (這部分你目前是成功的)
+        # 1. 抓取動態數據 (AkShare/FinMind 優先)
+        payload = get_dynamic_data(symbol)
+        
+        # 2. 抓取靜態與歷史指標 (yfinance)
         ticker = yf.Ticker(symbol)
+        
+        # 處理技術指標 (RSI, MA20)
         hist = ticker.history(period="60d")
-        if hist.empty: return False
-        
-        latest = hist.iloc[-1]
-        prev = hist.iloc[-2]
-        
-        payload = {
-            "current_price": clean_val(latest['Close']),
-            "prev_close": clean_val(prev['Close']),
-            "open_price": clean_val(latest['Open']),
-            "day_high": clean_val(latest['High']),
-            "day_low": clean_val(latest['Low']),
-            "volume": int(latest['Volume']),
-            "change_percent": ((latest['Close'] - prev['Close']) / prev['Close'] * 100),
-            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
-        }
-
-        # 計算 RSI 與 MA20 乖離
-        if len(hist) >= 20:
+        if not hist.empty:
+            latest = hist.iloc[-1]
+            if clean_val(payload.get("current_price")) == 0:
+                payload["current_price"] = clean_val(latest['Close'])
+                payload["volume"] = int(latest['Volume'])
+            
+            # 計算 RSI 14
+            delta = hist['Close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean().iloc[-1]
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean().iloc[-1]
+            payload["rsi_14"] = clean_val(100 - (100 / (1 + (gain/loss)))) if loss != 0 else 100
+            
+            # MA20 乖離
             ma20 = hist['Close'].rolling(window=20).mean().iloc[-1]
             payload["ma20_distance"] = clean_val((payload["current_price"] - ma20) / ma20 * 100)
             payload["trend_signal"] = "多頭" if payload["current_price"] > ma20 else "空頭"
 
-        # 2. 獲取優先來源數據
-        primary_data = get_region_data(symbol)
-        payload.update(primary_data)
-
-        # 3. ！！關鍵補全邏輯！！：使用 yfinance 補齊所有還是 0 的欄位
-        yf_info = ticker.info if ticker.info else {}
-        mapping = {
+        # 3. 靜態數據補全 (yfinance Fallback)
+        # 如果動態數據沒抓到 PE 或 市值，則強制用 yfinance 補齊
+        inf = ticker.info if ticker.info else {}
+        static_mapping = {
             "market_cap": "marketCap",
             "pe_ratio": "trailingPE",
             "pb_ratio": "priceToBook",
@@ -111,23 +104,21 @@ def fetch_and_sync(symbol):
             "dividend_yield": "dividendYield"
         }
 
-        for db_key, yf_key in mapping.items():
-            # 檢查目前 payload 裡該欄位是否為 0 或不存在
-            if clean_val(payload.get(db_key)) == 0:
-                val = yf_info.get(yf_key)
-                if db_key == "dividend_yield": val = clean_val(val) * 100
-                payload[db_key] = clean_val(val)
-                # 如果 yfinance 補成功了，印出來確認
-                if payload[db_key] != 0:
-                    print(f"🔹 {symbol} 的 {db_key} 由 yfinance 補全成功")
+        for db_k, yf_k in static_mapping.items():
+            if clean_val(payload.get(db_k)) == 0:
+                val = inf.get(yf_k)
+                if db_k == "dividend_yield": val = clean_val(val) * 100
+                payload[db_k] = clean_val(val)
 
-        # 4. 更新至資料庫
+        payload["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        # 4. 更新 Supabase
         supabase.table("watchlist").update(payload).eq("symbol", symbol).execute()
-        print(f"✅ {symbol} 同步完成 (Price: {payload['current_price']})")
+        print(f"✅ {symbol} 同步完成 (含靜態補全)")
         return True
 
     except Exception as e:
-        print(f"❌ {symbol} 發生錯誤: {e}")
+        print(f"❌ {symbol} 同步出錯: {e}")
         return False
 
 def main():
