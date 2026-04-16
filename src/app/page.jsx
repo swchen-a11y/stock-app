@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react'; // 導入圖標
+import { RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import useStockData from '../hooks/useStockData';
 
@@ -34,7 +34,7 @@ export default function StockApp() {
   const [deletingGroupId, setDeletingGroupId] = useState(null);
   const [localStocks, setLocalStocks] = useState([]);
   
-  // 新增狀態
+  // 同步與提示狀態
   const [isSyncing, setIsSyncing] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
 
@@ -43,28 +43,27 @@ export default function StockApp() {
 
   const { stocks: fetchedStocks, loading, refresh } = useStockData(selectedMarket);
 
-  // --- 自動刷新機制 ---
+  // --- 自動刷新機制 (每 30 秒) ---
   useEffect(() => {
-    // 當處於股票視圖且沒有在拖拽時，每 30 秒自動刷新一次
     const autoRefreshInterval = setInterval(() => {
+      // 僅在股票視圖、非加載中、非拖拽時自動刷新
       if (activeView === 'stock' && !isDraggingRef.current && !loading) {
-        console.log('自動更新數據中...');
         refresh();
       }
-    }, 30000); // 30000ms = 30秒
+    }, 30000);
 
-    return () => clearInterval(autoRefreshInterval); // 組件卸載時清除計時器
+    return () => clearInterval(autoRefreshInterval);
   }, [activeView, loading, refresh]);
 
-  // --- Toast 自動關閉邏輯 ---
+  // --- Toast 自動消失 ---
   useEffect(() => {
     if (toast.show) {
-      const timer = setTimeout(() => setToast({ ...toast, show: false }), 3000);
+      const timer = setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
       return () => clearTimeout(timer);
     }
-  }, [toast]);
+  }, [toast.show]);
 
-  // 同步資料庫資料到本地狀態
+  // 監控數據變化
   useEffect(() => {
     if (fetchedStocks && !isDraggingRef.current) {
       const sorted = [...fetchedStocks].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
@@ -74,33 +73,45 @@ export default function StockApp() {
     }
   }, [fetchedStocks]);
 
-  // --- 處理手動同步 (GitHub Action) ---
+  // --- 手動觸發同步指令 ---
   const handleManualSync = async () => {
     if (isSyncing) return;
     setIsSyncing(true);
     
     try {
-      // ⚠️ 請確保 API 路徑與你檔案結構一致：/api/stock/trigger
-      const response = await fetch('/api/stock/trigger', { method: 'POST' });
-      const data = await response.json();
+      // 加上超時控制，防止 fetch 永久掛起
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const response = await fetch('/api/stock/trigger', { 
+        method: 'POST',
+        signal: controller.signal 
+      });
+      
+      clearTimeout(timeoutId);
+
+      const data = await response.json().catch(() => ({ success: false, error: '解析 JSON 失敗' }));
       
       if (data.success) {
-        setToast({ show: true, message: '指令已發送，約 1 分鐘後更新', type: 'success' });
+        setToast({ show: true, message: '同步指令已發送，預計 1 分鐘內更新', type: 'success' });
       } else {
-        setToast({ show: true, message: '觸發失敗：' + (data.error || '未知錯誤'), type: 'error' });
+        setToast({ show: true, message: '觸發失敗: ' + (data.error || '未知錯誤'), type: 'error' });
       }
     } catch (error) {
-      setToast({ show: true, message: '連線失敗，請檢查網路', type: 'error' });
+      const msg = error.name === 'AbortError' ? '請求超時' : '連線失敗';
+      setToast({ show: true, message: msg, type: 'error' });
     } finally {
+      // 確保最後一定會釋放按鈕狀態，防止頁面鎖死
       setIsSyncing(false);
     }
   };
 
+  // --- 其他業務邏輯 ---
   const fetchGroups = useCallback(async () => {
     const { data } = await supabase.from('user_groups').select('*').order('created_at', { ascending: true });
     if (data && data.length > 0) setGroups(data);
     else setGroups([{ id: 'default', name: '我的代號' }]);
-  }, [setGroups]);
+  }, []);
 
   useEffect(() => {
     const init = async () => {
@@ -115,7 +126,7 @@ export default function StockApp() {
   }, [fetchGroups, router]);
 
   const handleAddGroup = useCallback(async (groupName) => {
-    if (!groupName || groupName.trim() === '') throw new Error('請輸入分組名稱');
+    if (!groupName || groupName.trim() === '') return;
     const { data: { user } } = await supabase.auth.getUser();
     await supabase.from('user_groups').insert([{ user_id: user.id, name: groupName.trim() }]);
     await fetchGroups();
@@ -124,16 +135,14 @@ export default function StockApp() {
   const handleEditGroup = useCallback(async (groupId, newName) => {
     await supabase.from('user_groups').update({ name: newName.trim() }).eq('id', groupId);
     await fetchGroups();
-    if (selectedMarket === groups.find(g => g.id === groupId)?.name) setSelectedMarket(newName.trim());
-  }, [fetchGroups, selectedMarket, groups, setSelectedMarket]);
+  }, [fetchGroups]);
 
   const handleDeleteGroup = useCallback(async (groupId) => {
     setDeletingGroupId(groupId);
     await supabase.from('user_groups').delete().eq('id', groupId);
     await fetchGroups();
-    if (selectedMarket === groups.find(g => g.id === groupId)?.name) setSelectedMarket('我的代號');
     setDeletingGroupId(null);
-  }, [fetchGroups, selectedMarket, groups, setSelectedMarket, setDeletingGroupId]);
+  }, [fetchGroups]);
 
   const handleReorder = useCallback(async (newOrder) => {
     isDraggingRef.current = true;
@@ -141,7 +150,7 @@ export default function StockApp() {
     const updates = newOrder.map((stock, index) => ({ id: stock.id, sort_order: index }));
     await supabase.from('watchlist').upsert(updates);
     isDraggingRef.current = false;
-  }, [setLocalStocks]);
+  }, []);
 
   const handleDragStart = useCallback(() => { isDraggingRef.current = true; }, []);
   const handleDragEnd = useCallback(() => { 
@@ -164,32 +173,26 @@ export default function StockApp() {
     setLocalStocks(prev => prev.filter(s => s.id !== stockId));
     await supabase.from('watchlist').delete().eq('id', stockId);
     setTimeout(() => refresh(), 300);
-  }, [setLocalStocks, refresh]);
+  }, [refresh]);
 
   const marketList = useMemo(() => groups.map(g => g.name), [groups]);
 
   return (
     <div className="min-h-screen bg-[#121212] text-white select-none overflow-hidden relative font-pingfang">
       
-      {/* --- 🌟 iOS 質感 Toast --- */}
+      {/* 🌟 iOS 質感 Toast 提示 */}
       <AnimatePresence>
         {toast.show && (
           <motion.div
             initial={{ opacity: 0, y: -20, x: '-50%' }}
             animate={{ opacity: 1, y: 0, x: '-50%' }}
             exit={{ opacity: 0, y: -20, x: '-50%' }}
-            className="fixed top-24 left-1/2 z-[5000] w-auto whitespace-nowrap"
+            className="fixed top-24 left-1/2 z-[5000] w-auto whitespace-nowrap px-4"
           >
             <div className={`px-4 py-2.5 rounded-2xl backdrop-blur-xl border flex items-center gap-2.5 shadow-2xl ${
-              toast.type === 'success' 
-              ? 'bg-white/10 border-white/20' 
-              : 'bg-red-500/20 border-red-500/30'
+              toast.type === 'success' ? 'bg-white/10 border-white/20' : 'bg-red-500/20 border-red-500/30'
             }`}>
-              {toast.type === 'success' ? (
-                <CheckCircle2 className="w-4 h-4 text-green-400" />
-              ) : (
-                <AlertCircle className="w-4 h-4 text-red-400" />
-              )}
+              {toast.type === 'success' ? <CheckCircle2 className="w-4 h-4 text-green-400" /> : <AlertCircle className="w-4 h-4 text-red-400" />}
               <span className="text-[14px] font-medium text-white/90">{toast.message}</span>
             </div>
           </motion.div>
@@ -216,25 +219,19 @@ export default function StockApp() {
               </div>
               
               <div className="flex items-center gap-2 mt-2">
-                {/* 頂部膠囊按鈕 */}
                 <div className="ios-glass-capsule !rounded-full px-3 py-1.5 flex items-center gap-3">
-                  
-                  {/* 刷新按鈕 */}
+                  {/* 手動同步按鈕 */}
                   <button 
                     onClick={handleManualSync}
                     disabled={isSyncing}
-                    className={`ios-tap-feedback ${isSyncing ? 'opacity-40' : 'opacity-80'}`}
+                    className={`ios-tap-feedback transition-opacity ${isSyncing ? 'opacity-40 cursor-not-allowed' : 'opacity-80'}`}
                   >
                     <RefreshCw className={`w-5 h-5 stroke-white stroke-[2.5] ${isSyncing ? 'animate-spin' : ''}`} />
                   </button>
 
                   <div className="w-[1px] h-4 bg-white/10" />
 
-                  {/* 搜尋按鈕 */}
-                  <button 
-                    onClick={() => setActiveView('search')} 
-                    className="ios-tap-feedback opacity-80"
-                  >
+                  <button onClick={() => setActiveView('search')} className="ios-tap-feedback opacity-80">
                     <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 stroke-white stroke-[2.5]">
                       <circle cx="11" cy="11" r="8" />
                       <path d="M21 21l-4.35-4.35" />
@@ -243,7 +240,6 @@ export default function StockApp() {
 
                   <div className="w-[1px] h-4 bg-white/10" />
 
-                  {/* 菜單按鈕 */}
                   <button className="ios-tap-feedback opacity-80" onClick={() => setIsActionMenuOpen(true)}>
                     <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6 fill-white">
                       <circle cx="12" cy="12" r="2" />
@@ -257,11 +253,7 @@ export default function StockApp() {
 
             {activeView === 'stock' && (
               <>
-                <MarketSelector 
-                  selectedMarket={selectedMarket} 
-                  onClick={() => setIsMarketMenuOpen(true)} 
-                  isMenuOpen={isMarketMenuOpen} 
-                />
+                <MarketSelector selectedMarket={selectedMarket} onClick={() => setIsMarketMenuOpen(true)} isMenuOpen={isMarketMenuOpen} />
                 <main className="mt-4">
                   <StockListView 
                     loading={loading} 
@@ -276,18 +268,40 @@ export default function StockApp() {
                 </main>
               </>
             )}
-            {/* ... 資金與設定視圖維持原樣 ... */}
+
+            {activeView === 'finance' && <FinanceView />}
+            {activeView === 'settings' && <SettingsView />}
           </motion.div>
         ) : (
-          <motion.div 
-            key="search-view"
-            className="fixed inset-0 z-[2000] bg-black"
-          >
+          <motion.div key="search-view" className="fixed inset-0 z-[2000] bg-black">
             <SearchPage isView={true} onBack={() => setActiveView('stock')} onStockAdded={refresh} />
           </motion.div>
         )}
       </AnimatePresence>
-      {/* ... Modal 區塊維持原樣 ... */}
+
+      <ActionMenu isOpen={isActionMenuOpen} onClose={() => setIsActionMenuOpen(false)} activeView={activeView} onViewChange={setActiveView} />
+
+      <MarketDropdown 
+        isOpen={isMarketMenuOpen} 
+        onClose={() => setIsMarketMenuOpen(false)} 
+        selectedMarket={selectedMarket} 
+        setSelectedMarket={setSelectedMarket} 
+        marketList={marketList} 
+        onManageGroups={() => { setIsMarketMenuOpen(false); setTimeout(() => setIsManageGroupsOpen(true), 300); }} 
+      />
+      <ManageGroupsModal 
+        isOpen={isManageGroupsOpen} 
+        onClose={() => setIsManageGroupsOpen(false)} 
+        groups={groups} 
+        selectedMarket={selectedMarket} 
+        onAdd={handleAddGroup} 
+        onEdit={handleEditGroup} 
+        onDelete={handleDeleteGroup} 
+        deletingGroupId={deletingGroupId} 
+        onReorder={setGroups} 
+      />
+      {selectedStockDetail && <StockDetailModal isOpen={!!selectedStockDetail} onClose={() => setSelectedStockDetail(null)} stock={selectedStockDetail} onRefresh={refresh} />}
+      {selectedStockForGroups && <AddToGroupModal isOpen={!!selectedStockForGroups} onClose={() => setSelectedStockForGroups(null)} stock={selectedStockForGroups} groups={groups} onToggleGroup={handleToggleStockInGroup} />}
     </div>
   );
 }
