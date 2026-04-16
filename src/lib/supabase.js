@@ -1,9 +1,33 @@
 import { createClient } from '@supabase/supabase-js';
 
+// 前端公開配置（瀏覽器端使用）
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// 後端服務角色配置（伺服器端使用）
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+// 判斷是否在伺服器環境
+const isServer = typeof window === 'undefined';
+
+// 創建 Supabase 客戶端
+// 在伺服器端使用服務角色密鑰以繞過 RLS，在瀏覽器端使用匿名密鑰
+export const supabase = createClient(
+  supabaseUrl, 
+  isServer && supabaseServiceKey ? supabaseServiceKey : supabaseAnonKey,
+  {
+    db: { schema: 'public' },
+    schema: 'public'
+  }
+);
+
+// 伺服器專用的 Supabase 客戶端（始終使用服務角色密鑰）
+export const supabaseServer = isServer && supabaseServiceKey 
+  ? createClient(supabaseUrl, supabaseServiceKey, {
+      db: { schema: 'public' },
+      schema: 'public'
+    })
+  : null;
 
 /**
  * Supabase 資料庫服務層
